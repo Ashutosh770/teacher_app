@@ -96,3 +96,14 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+export type {
+  SchoolLocation,
+  FaceEnrollmentRecord,
+  StaffAttendanceRecord,
+  RosterStudent,
+  UnresolvedDetection,
+  EnrollmentStatus,
+  RosterAttendanceStatus,
+  StatusSource,
+} from './attendance';

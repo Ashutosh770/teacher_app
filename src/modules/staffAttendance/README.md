@@ -42,15 +42,20 @@ installed dev client (not Expo Go).
 | Package | Version | Purpose |
 |---|---|---|
 | `expo-location` | `~57.0.2` | GPS reading + Android mock-location flag |
-| `react-native-vision-camera` | `^5.1.0` | Camera capture + frame processors |
+| `react-native-vision-camera` | `4.7.3` (pinned) | Camera capture + frame processors + Expo config plugin |
 | `expo-linking` | `~57.0.2` | `Linking.openSettings()` for blocked-permission deep link |
+
+> **Vision Camera version note:** pinned to **v4.7.3** (not npm `latest` v5). v5 is a
+> nitro-modules rewrite that drops the Expo config plugin and needs extra native peer
+> deps; the design and the task-6.4 face detector target the **v4** config-plugin +
+> frame-processor architecture, so v4.7.3 is the compatible choice.
 
 ### Face model — deferred to task 6.4
 
-The face **detection/embedding** package (e.g. a vision-camera v5-compatible
-face-detector frame-processor plugin, or `react-native-fast-tflite` with a bundled
-embedding model) is **intentionally not installed yet**. The exact package and a version
-that resolves cleanly against `react-native-vision-camera@^5` on SDK 57 is decided when
+The face **detection/embedding** package (e.g. `react-native-vision-camera-face-detector`
+compatible with vision-camera v4, or `react-native-fast-tflite` with a bundled embedding
+model) is **intentionally not installed yet**. The exact package and a version that
+resolves cleanly against `react-native-vision-camera@4.7.3` on SDK 57 is decided when
 the real `FaceMatchProvider` lands in **task 6.4**, behind the `FaceMatchProvider`
 abstraction. Automated tests use the deterministic mock provider until then. This avoids
 pinning an unverified/incorrect native package during setup.
