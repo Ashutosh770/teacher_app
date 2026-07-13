@@ -10,6 +10,7 @@ import classDiaryReducer from '../modules/classDiary/state/classDiarySlice';
 import announcementReducer from '../modules/announcement/state/announcementSlice';
 import adminDashboardReducer from '../modules/adminDashboard/state/adminDashboardSlice';
 import offlineSyncReducer from '../modules/offlineSync/state/offlineSyncSlice';
+import { persistQueue } from '../modules/offlineSync/services/queuePersistence';
 
 export const store = configureStore({
   reducer: {
@@ -24,6 +25,13 @@ export const store = configureStore({
     adminDashboard: adminDashboardReducer,
     offlineSync: offlineSyncReducer,
   },
+});
+
+// Persist the offline sync queue on every mutation so it survives restarts
+// (Req 15.1). persistQueue guards against redundant writes via reference
+// comparison, so this subscriber is cheap for non-queue state changes.
+store.subscribe(() => {
+  persistQueue(store.getState().offlineSync.queue);
 });
 
 export type RootState = ReturnType<typeof store.getState>;

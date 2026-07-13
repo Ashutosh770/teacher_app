@@ -22,6 +22,14 @@ export interface SyncQueueItem {
   timestamp: number;
   status: 'pending' | 'syncing' | 'failed';
   retryCount: number;
+  /**
+   * Optional per-item cap on sync attempts before the item is marked
+   * permanently `failed`. Attendance-related items carry
+   * `attendanceConfig.offline.maxSyncAttempts` (5); items without this field
+   * fall back to the default retry policy (MAX_RETRIES = 3) so other modules
+   * are unaffected. (Req 15.2, 15.5)
+   */
+  maxAttempts?: number;
 }
 
 export interface AttendanceRecord {

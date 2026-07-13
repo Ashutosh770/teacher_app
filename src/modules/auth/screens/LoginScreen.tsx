@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useAppDispatch, useAppSelector } from '../../../store';
 import { loginStart, loginSuccess, loginFailure } from '../state/authSlice';
+import { login as mockLogin } from '../services/mockAuthService';
 import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
 
 export default function LoginScreen() {
@@ -17,10 +18,14 @@ export default function LoginScreen() {
     if (!username || !password) return;
 
     dispatch(loginStart());
-    // TODO: Replace with actual API call
+    // TODO: Replace mockLogin with a real apiService.post('/auth/login', ...) call
     try {
-      // Placeholder - will connect to real auth service
-      dispatch(loginFailure('Authentication service not yet configured'));
+      const response = await mockLogin(username, password);
+      if (response.success && response.data) {
+        dispatch(loginSuccess(response.data));
+      } else {
+        dispatch(loginFailure(response.error ?? 'Authentication failed'));
+      }
     } catch (err) {
       dispatch(loginFailure('Authentication failed'));
     }

@@ -1,31 +1,142 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+/**
+ * Staff attendance screen — a step ROUTER keyed off the `staffAttendance` slice's
+ * `flowState` (design → "Screen composition"). It renders one of three
+ * presentational steps — `GpsStep`, `FaceStep`, `SuccessStep` — while the
+ * `staffAttendanceService` state machine owns all transitions.
+ *
+ * On mount it enforces the enrollment guard (`useStaffEnrollmentGuard`) and kicks
+ * off the flow via `staffAttendanceService.begin()`. When the flow lands in
+ * `needs_enrollment` (no `FaceEnrollmentRecord`), it surfaces the enrollment
+ * screen so the teacher can self-enroll before attempting the face step (Req 7.1).
+ *
+ * The detailed permission/error recovery controls (retry / open-settings /
+ * manual fallback) are task 10.2; this router leaves those as seams on the step
+ * components.
+ *
+ * Requirements: 2.5, 3.2, 5.2, 6.2, 6.5
+ */
+import React, { useEffect } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useAppSelector } from '../../../store';
 import { colors, spacing, typography } from '../../../shared/theme';
+import { staffAttendanceService } from '../services/staffAttendanceService';
+import { useStaffEnrollmentGuard } from '../services/staffEnrollmentGuard';
+import type { StaffFlowState } from '../state/staffAttendanceSlice';
+import GpsStep from '../components/GpsStep';
+import FaceStep from '../components/FaceStep';
+import SuccessStep from '../components/SuccessStep';
+import FaceEnrollmentScreen from './FaceEnrollmentScreen';
 
-export default function StaffAttendanceScreen() {
+/** Which step component owns a given flow state. */
+type StepKind = 'loading' | 'enrollment' | 'gps' | 'face' | 'success';
+
+const GPS_STATES: ReadonlySet<StaffFlowState> = new Set<StaffFlowState>([
+  'location_permission',
+  'location_denied',
+  'acquiring_gps',
+  'gps_error',
+  'evaluate_fence',
+  'unreliable',
+  'mock_detected',
+  'out_of_fence',
+  'location_verified',
+  'manual_fallback',
+]);
+
+const FACE_STATES: ReadonlySet<StaffFlowState> = new Set<StaffFlowState>([
+  'camera_permission',
+  'camera_denied',
+  'face_capture',
+  'face_matching',
+  'attempt_failed',
+  'face_failed',
+  'service_error',
+  'confirm',
+]);
+
+const SUCCESS_STATES: ReadonlySet<StaffFlowState> = new Set<StaffFlowState>([
+  'success',
+  'already_marked',
+  'pending_sync',
+  'persist_error',
+]);
+
+function stepFor(flowState: StaffFlowState): StepKind {
+  if (flowState === 'needs_enrollment') return 'enrollment';
+  if (GPS_STATES.has(flowState)) return 'gps';
+  if (FACE_STATES.has(flowState)) return 'face';
+  if (SUCCESS_STATES.has(flowState)) return 'success';
+  return 'loading';
+}
+
+export default function StaffAttendanceScreen(): React.ReactElement {
+  const flowState = useAppSelector((s) => s.staffAttendance.flowState);
+
+  // Enforce the enrollment guard, then begin the flow. When enrollment is
+  // missing the guard drives the flow to `needs_enrollment`; we surface the
+  // enrollment screen inline (no dedicated route is registered).
+  const runGuard = useStaffEnrollmentGuard();
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const decision = await runGuard();
+      if (!active) return;
+      if (decision.allowed) {
+        await staffAttendanceService.begin();
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [runGuard]);
+
+  const step = stepFor(flowState);
+
+  if (step === 'enrollment') {
+    // Redirect target: render the self-enrollment screen so the teacher can
+    // enroll before the face step (Req 7.1).
+    return <FaceEnrollmentScreen />;
+  }
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Staff Attendance</Text>
-      <Text style={styles.subtitle}>Record and view staff attendance</Text>
-    </View>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      {step === 'loading' ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.loadingText}>Preparing attendance…</Text>
+        </View>
+      ) : step === 'gps' ? (
+        <GpsStep />
+      ) : step === 'face' ? (
+        <FaceStep />
+      ) : (
+        <SuccessStep />
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    flexGrow: 1,
+  },
+  centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.background,
-    padding: spacing.lg,
+    padding: spacing.xl,
   },
-  title: {
-    ...typography.h2,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
+  loadingText: {
     ...typography.body,
     color: colors.textSecondary,
+    marginTop: spacing.md,
   },
 });
