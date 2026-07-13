@@ -13,10 +13,12 @@
  *
  * Requirements: 2.5, 3.2
  */
-import React, { useCallback } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { useAppSelector } from '../../../store';
-import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
+import { colors, spacing, typography, borderRadius, withAlpha } from '../../../shared/theme';
 import { attendanceConfig } from '../../../shared/config/attendanceConfig';
 import { staffAttendanceService } from '../services/staffAttendanceService';
 import { locationPermissionManager } from '../../../shared/services/permissions';
@@ -142,49 +144,83 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
     : 'pending';
   const mockTone: Tone = result ? (result.status === 'mock_detected' ? 'bad' : 'good') : 'pending';
 
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] });
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Verify your location</Text>
+      <Text style={styles.stepLabel}>Step 1</Text>
+      <Text style={styles.title}>Location Verification</Text>
       <Text style={styles.subtitle}>
         We check that you are within the school geo-fence before face verification.
       </Text>
 
-      {/* Map / location card — placeholder for the Figma map preview. */}
+      {/* Map / location visual. */}
       <View style={styles.mapCard}>
+        <LinearGradient colors={['#EFF6FF', '#ECFDF5']} style={StyleSheet.absoluteFill} />
         {isAcquiring ? (
           <View style={styles.mapCenter}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.mapCaption}>Acquiring GPS…</Text>
           </View>
         ) : (
-          <View style={styles.mapCenter}>
-            <View style={styles.mapPin} />
-            <Text style={styles.mapCaption}>
-              {isVerified ? 'You are inside the school area' : 'Location preview'}
-            </Text>
-          </View>
+          <>
+            <View style={styles.mapCenter}>
+              <Animated.View
+                style={[
+                  styles.pulseRing,
+                  { backgroundColor: withAlpha(toneColor(distanceTone), 0.25) },
+                  { opacity: ringOpacity, transform: [{ scale: ringScale }] },
+                ]}
+              />
+              <View style={[styles.mapPinWrap, { backgroundColor: colors.primary }]}>
+                <Feather name="map-pin" size={22} color={colors.surface} />
+              </View>
+            </View>
+            {result ? (
+              <View style={styles.youAreHereDot}>
+                <View style={styles.youAreHereCore} />
+              </View>
+            ) : null}
+            <View style={styles.distancePillWrap}>
+              <View style={styles.distancePill}>
+                <Text style={[styles.distancePillText, { color: toneColor(distanceTone) }]}>
+                  {result ? `${Math.round(result.distanceMeters)} meters` : 'Locating…'}
+                </Text>
+              </View>
+            </View>
+          </>
         )}
       </View>
 
-      {/* Three status rows: distance, accuracy, mock. */}
-      <View style={styles.statusCard}>
+      {/* Three tinted status rows: distance, accuracy, mock. */}
+      <View style={styles.statusStack}>
         <StatusRow
-          label="Distance"
+          label="Distance from school"
           value={
             result ? `${Math.round(result.distanceMeters)} m / ${Math.round(result.radiusMeters)} m` : '—'
           }
           tone={distanceTone}
         />
-        <View style={styles.divider} />
         <StatusRow
-          label="Accuracy"
+          label="GPS Accuracy"
           value={result ? `±${Math.round(result.accuracyMeters)} m` : '—'}
           tone={accuracyTone}
         />
-        <View style={styles.divider} />
         <StatusRow
-          label="Mock location"
-          value={result ? (result.status === 'mock_detected' ? 'Detected' : 'Not detected') : '—'}
+          label="Mock Location"
+          value={result ? (result.status === 'mock_detected' ? 'Detected' : 'Not Detected') : '—'}
           tone={mockTone}
         />
       </View>
@@ -192,8 +228,9 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
       {isVerified ? (
-        <TouchableOpacity style={styles.button} onPress={onContinue}>
-          <Text style={styles.buttonText}>Continue to face verification</Text>
+        <TouchableOpacity style={styles.primaryButton} onPress={onContinue}>
+          <Feather name="check-circle" size={18} color={colors.surface} />
+          <Text style={styles.primaryButtonText}>Continue to face verification</Text>
         </TouchableOpacity>
       ) : isRecovery ? (
         /* Permission/error recovery + manual fallback controls (task 10.2),
@@ -231,11 +268,11 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
         </View>
       ) : (
         <TouchableOpacity
-          style={[styles.button, isAcquiring && styles.buttonDisabled]}
+          style={[styles.primaryButton, isAcquiring && styles.buttonDisabled]}
           onPress={onVerifyLocation}
           disabled={isAcquiring}
         >
-          <Text style={styles.buttonText}>Verify Location</Text>
+          <Text style={styles.primaryButtonText}>Verify Location</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -244,12 +281,9 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
 
 function StatusRow({ label, value, tone }: { label: string; value: string; tone: Tone }) {
   return (
-    <View style={styles.statusRow}>
+    <View style={[styles.statusRow, { backgroundColor: withAlpha(toneColor(tone), 0.1) }]}>
       <Text style={styles.statusLabel}>{label}</Text>
-      <View style={styles.statusValueWrap}>
-        <View style={[styles.dot, { backgroundColor: toneColor(tone) }]} />
-        <Text style={[styles.statusValue, { color: toneColor(tone) }]}>{value}</Text>
-      </View>
+      <Text style={[styles.statusValue, { color: toneColor(tone) }]}>{value}</Text>
     </View>
   );
 }
@@ -258,22 +292,27 @@ const styles = StyleSheet.create({
   container: {
     padding: spacing.lg,
   },
+  stepLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
   title: {
     ...typography.h2,
     color: colors.primary,
     marginBottom: spacing.xs,
+    textAlign: 'center',
   },
   subtitle: {
     ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+    textAlign: 'center',
   },
   mapCard: {
-    height: 180,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.lg,
+    height: 220,
+    borderRadius: borderRadius.xl,
     marginBottom: spacing.lg,
     overflow: 'hidden',
   },
@@ -282,57 +321,112 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  mapPin: {
+  pulseRing: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: borderRadius.full,
+  },
+  mapPinWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  youAreHereDot: {
+    position: 'absolute',
+    top: '42%',
+    left: '58%',
     width: 20,
     height: 20,
     borderRadius: borderRadius.full,
-    backgroundColor: colors.primary,
-    marginBottom: spacing.sm,
+    backgroundColor: colors.blue,
+    borderWidth: 3,
+    borderColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  youAreHereCore: {
+    width: 8,
+    height: 8,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.surface,
+  },
+  distancePillWrap: {
+    position: 'absolute',
+    bottom: spacing.md,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  distancePill: {
+    backgroundColor: withAlpha('#FFFFFF', 0.95),
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + spacing.xs,
+    borderRadius: borderRadius.full,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  distancePillText: {
+    ...typography.bodyBold,
   },
   mapCaption: {
     ...typography.caption,
     color: colors.textSecondary,
+    marginTop: spacing.sm,
   },
-  statusCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
+  statusStack: {
+    gap: spacing.sm,
     marginBottom: spacing.lg,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
   },
   statusLabel: {
     ...typography.body,
+    fontWeight: '600',
     color: colors.text,
-  },
-  statusValueWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: borderRadius.full,
-    marginRight: spacing.sm,
   },
   statusValue: {
     ...typography.body,
-    fontWeight: '600',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
+    fontWeight: '700',
   },
   errorText: {
     ...typography.caption,
     color: colors.error,
     marginBottom: spacing.md,
+  },
+  primaryButton: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    backgroundColor: colors.secondary,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonText: {
+    color: colors.surface,
+    ...typography.body,
+    fontWeight: '700',
   },
   button: {
     backgroundColor: colors.primary,

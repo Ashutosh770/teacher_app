@@ -16,7 +16,7 @@
  * confirm-before-replace prompt (Req 7.7); the replace only takes effect on a
  * successful capture (the service preserves the prior record on failure — Req 7.6).
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,12 +26,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Camera, useCameraDevice } from 'react-native-vision-camera';
+import { Feather } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '../../../store';
 import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
 import {
   faceEnrollmentService,
   type EnrollmentResult,
 } from '../../../shared/services/faceEnrollment';
+import { faceCaptureService } from '../../../shared/services/faceCapture';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
 import { setEnrollmentStatus, setHasEnrollmentRecord } from '../state/staffAttendanceSlice';
 
@@ -49,6 +52,20 @@ export default function FaceEnrollmentScreen() {
 
   const [feedback, setFeedback] = useState<Feedback>({ kind: 'none' });
   const isRunning = status === 'capturing' || status === 'saving';
+
+  // Real camera preview + capture binding (Req 7.2). Without this,
+  // `faceEnrollmentService.enroll()` always fails with "Camera is not
+  // attached" since `captureFrame()` requires a mounted `<Camera>` ref.
+  const cameraRef = useRef<Camera>(null);
+  const device = useCameraDevice('front');
+  useEffect(() => {
+    if (cameraRef.current) {
+      faceCaptureService.attachCamera(cameraRef.current);
+    }
+    return () => {
+      faceCaptureService.detachCamera();
+    };
+  }, [device]);
 
   // Reflect whether a record already exists on entry so the UI can offer
   // re-enrollment (Req 7.7) vs first-time enrollment without waiting for an attempt.
@@ -141,6 +158,16 @@ export default function FaceEnrollmentScreen() {
       <Text style={styles.subtitle}>
         Enroll your face so you can mark attendance with face verification.
       </Text>
+
+      <View style={styles.cameraPanel}>
+        {device ? (
+          <Camera ref={cameraRef} style={StyleSheet.absoluteFill} device={device} isActive photo />
+        ) : (
+          <View style={styles.cameraFallback}>
+            <Feather name="camera" size={32} color={colors.disabled} />
+          </View>
+        )}
+      </View>
 
       <View style={styles.statusCard}>
         <Text style={styles.statusLabel}>Status</Text>
@@ -238,6 +265,18 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+  },
+  cameraPanel: {
+    height: 240,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: '#1A202C',
+    marginBottom: spacing.lg,
+  },
+  cameraFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statusCard: {
     backgroundColor: colors.surface,

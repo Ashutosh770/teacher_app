@@ -60,21 +60,28 @@ export interface TimetableEntry {
   room: string;
 }
 
+/** CBSE-style exam type codes used by the marks entry screen. */
+export type ExamTypeCode = 'MT' | 'PT-1' | 'PT-2' | 'TE-1' | 'TE-2' | 'HY' | 'ANN';
+
 export interface StudentMark {
   id: string;
   studentId: string;
   studentName: string;
   assessmentId: string;
-  mark: number;
+  /** Null means "not entered yet" (rendered as a blank input, matching Figma). */
+  theoryMark: number | null;
+  practicalMark: number | null;
+  internalMark: number | null;
 }
 
 export interface Assessment {
   id: string;
   name: string;
-  type: 'exam' | 'assignment' | 'quiz';
+  type: ExamTypeCode;
   maxScore: number;
   subjectId: string;
   classId: string;
+  status: 'draft' | 'submitted';
 }
 
 export interface DiaryEntry {
@@ -86,6 +93,9 @@ export interface DiaryEntry {
   topicsCovered: string;
   homework?: string;
   isFinalized: boolean;
+  /** When the entry was created — drives the 24h edit/delete lock window. */
+  postedAt: string;
+  attachmentName?: string;
 }
 
 export interface Announcement {

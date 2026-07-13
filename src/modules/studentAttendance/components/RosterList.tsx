@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
-import { borderRadius, colors, spacing, typography } from '../../../shared/theme';
+import { Feather } from '@expo/vector-icons';
+import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
+import { StatusPill } from '../../../shared/components';
 import type {
   RosterAttendanceStatus,
   RosterStudent,
@@ -67,30 +69,50 @@ function RosterRow({
   student: RosterStudent;
   renderStatusControl?: (student: RosterStudent) => React.ReactNode;
 }) {
-  const enrolled = student.enrollmentStatus === 'enrolled';
+  const isPresent = student.attendanceStatus === 'present';
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, isPresent && styles.rowPresent]}>
+      <View style={[styles.avatar, isPresent && styles.avatarPresent]}>
+        <Text style={[styles.avatarText, isPresent && styles.avatarTextPresent]}>{student.rollNo}</Text>
+      </View>
       <View style={styles.rowMain}>
         <Text style={styles.name} numberOfLines={1}>
           {student.name}
         </Text>
         <View style={styles.metaRow}>
-          <Text style={styles.roll}>Roll {student.rollNo}</Text>
-          <Text style={styles.metaDot}>·</Text>
-          <Text style={[styles.enrollment, enrolled ? styles.enrolled : styles.notEnrolled]}>
-            {enrolled ? 'Enrolled' : 'Not Enrolled'}
-          </Text>
+          <RosterFaceStatus student={student} />
         </View>
       </View>
       <View style={styles.rowTrailing}>
         {renderStatusControl ? (
           renderStatusControl(student)
+        ) : isPresent ? (
+          <Feather name="check-circle" size={26} color={colors.success} />
         ) : (
           <StatusBadge status={student.attendanceStatus} />
         )}
       </View>
     </View>
   );
+}
+
+/** Two-part face-verification status: "Face Verified 96%" / "Not Scanned" / "No Face Data". */
+function RosterFaceStatus({ student }: { student: RosterStudent }) {
+  const enrolled = student.enrollmentStatus === 'enrolled';
+  if (student.attendanceStatus === 'present' && student.statusSource === 'face_match') {
+    return (
+      <View style={styles.faceStatusRow}>
+        <StatusPill label="Face Verified" tone="success" />
+        {student.faceMatchConfidence != null && (
+          <Text style={styles.confidenceText}>{Math.round(student.faceMatchConfidence)}%</Text>
+        )}
+      </View>
+    );
+  }
+  if (enrolled) {
+    return <StatusPill label="Not Scanned" tone="warning" />;
+  }
+  return <StatusPill label="No Face Data" tone="neutral" />;
 }
 
 const STATUS_LABEL: Record<RosterAttendanceStatus, string> = {
@@ -129,11 +151,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    padding: spacing.md,
+  },
+  rowPresent: {
+    borderColor: withAlpha(colors.success, 0.4),
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  avatarPresent: {
+    backgroundColor: withAlpha(colors.success, 0.2),
+  },
+  avatarText: {
+    ...typography.bodyBold,
+    color: colors.textSecondary,
+  },
+  avatarTextPresent: {
+    color: colors.success,
   },
   rowMain: {
     flex: 1,
@@ -145,30 +188,20 @@ const styles = StyleSheet.create({
   name: {
     ...typography.body,
     color: colors.text,
-    fontWeight: '600',
+    fontWeight: '700',
+    marginBottom: spacing.xs,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.xs,
   },
-  roll: {
-    ...typography.caption,
-    color: colors.textSecondary,
+  faceStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
-  metaDot: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginHorizontal: spacing.xs,
-  },
-  enrollment: {
-    ...typography.caption,
-    fontWeight: '600',
-  },
-  enrolled: {
-    color: colors.success,
-  },
-  notEnrolled: {
+  confidenceText: {
+    ...typography.small,
     color: colors.textSecondary,
   },
   badge: {

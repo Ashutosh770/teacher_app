@@ -31,6 +31,9 @@ const classDiarySlice = createSlice({
         state.entries[index] = action.payload;
       }
     },
+    deleteEntry(state, action: PayloadAction<string>) {
+      state.entries = state.entries.filter(e => e.id !== action.payload);
+    },
     setLoading(state, action: PayloadAction<boolean>) {
       state.isLoading = action.payload;
     },
@@ -47,6 +50,7 @@ export const {
   setEntries,
   addEntry,
   updateEntry,
+  deleteEntry,
   setLoading,
   setError,
   setSubmitting,

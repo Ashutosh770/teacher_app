@@ -12,10 +12,11 @@
  *
  * Requirements: 6.2, 6.5
  */
-import React, { useCallback } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useAppSelector } from '../../../store';
-import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
+import { colors, spacing, typography, borderRadius, withAlpha } from '../../../shared/theme';
 import { SyncStatusBadge } from '../../../shared/components';
 import { useRecordSyncStatus } from '../../../shared/hooks/useSyncStatus';
 import { staffAttendanceService } from '../services/staffAttendanceService';
@@ -93,6 +94,17 @@ export default function SuccessStep(props: SuccessStepProps): React.ReactElement
 
   const variant = variantFor(flowState, record);
   const isPersistError = flowState === 'persist_error';
+  const isSuccess = flowState === 'success';
+
+  const bounce = useRef(new Animated.Value(isSuccess ? 0 : 1)).current;
+  useEffect(() => {
+    if (!isSuccess) {
+      bounce.setValue(1);
+      return;
+    }
+    Animated.spring(bounce, { toValue: 1, friction: 4, tension: 80, useNativeDriver: true }).start();
+  }, [isSuccess, bounce]);
+  const badgeScale = bounce.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] });
 
   // Retry submission after a persistence error; all verification data is
   // preserved so no re-verification is needed (Req 6.4/17.5).
@@ -116,9 +128,19 @@ export default function SuccessStep(props: SuccessStepProps): React.ReactElement
   const faceValue =
     record?.faceMatchConfidence != null ? `${Math.round(record.faceMatchConfidence)}%` : 'N/A';
 
+  const badgeIcon =
+    flowState === 'pending_sync' ? 'clock' : flowState === 'persist_error' ? 'x-circle' : 'check-circle';
+
   return (
     <View style={styles.container}>
-      <View style={[styles.badge, { backgroundColor: variant.accent }]} />
+      <Animated.View
+        style={[
+          styles.badge,
+          { backgroundColor: withAlpha(variant.accent, 0.1), transform: [{ scale: badgeScale }] },
+        ]}
+      >
+        <Feather name={badgeIcon} size={48} color={variant.accent} />
+      </Animated.View>
       <Text style={[styles.heading, { color: variant.accent }]}>{variant.heading}</Text>
       <Text style={styles.message}>{variant.message}</Text>
 
@@ -180,14 +202,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   badge: {
-    width: 56,
-    height: 56,
+    width: 112,
+    height: 112,
     borderRadius: borderRadius.full,
     marginBottom: spacing.md,
     marginTop: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   heading: {
-    ...typography.h2,
+    ...typography.h1,
     marginBottom: spacing.xs,
   },
   message: {
@@ -198,10 +222,8 @@ const styles = StyleSheet.create({
   },
   grid: {
     alignSelf: 'stretch',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
     padding: spacing.sm,
   },
   gridRow: {

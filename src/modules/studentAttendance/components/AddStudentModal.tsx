@@ -132,8 +132,13 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
     padding: spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
   },
   title: {
     ...typography.h3,
@@ -193,7 +198,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   buttonPrimary: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.secondary,
   },
   buttonPrimaryText: {
     ...typography.body,

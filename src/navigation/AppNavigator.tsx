@@ -2,23 +2,27 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { Feather } from '@expo/vector-icons';
 import { useAppSelector } from '../store';
 import { colors } from '../shared/theme';
 import { PermissionGate } from '../shared/components';
 import { useOfflineSyncProcessor } from '../modules/offlineSync';
 
 // Module screens
+import HomeScreen from '../modules/home/screens/HomeScreen';
 import LoginScreen from '../modules/auth/screens/LoginScreen';
-import StaffAttendanceScreen from '../modules/staffAttendance/screens/StaffAttendanceScreen';
 import FaceEnrollmentScreen from '../modules/staffAttendance/screens/FaceEnrollmentScreen';
 import StudentAttendanceScreen from '../modules/studentAttendance/screens/StudentAttendanceScreen';
 import StudentFaceEnrollmentScreen from '../modules/studentAttendance/screens/StudentFaceEnrollmentScreen';
+import AttendanceTabScreen from '../modules/attendance/screens/AttendanceTabScreen';
 import LeaveManagementScreen from '../modules/leaveManagement/screens/LeaveManagementScreen';
+import LeaveStatusScreen from '../modules/leaveManagement/screens/LeaveStatusScreen';
 import TimeTableScreen from '../modules/timeTable/screens/TimeTableScreen';
 import StudentMarksScreen from '../modules/studentMarks/screens/StudentMarksScreen';
 import ClassDiaryScreen from '../modules/classDiary/screens/ClassDiaryScreen';
 import AnnouncementScreen from '../modules/announcement/screens/AnnouncementScreen';
 import AdminDashboardScreen from '../modules/adminDashboard/screens/AdminDashboardScreen';
+import ProfileScreen from '../modules/profile/screens/ProfileScreen';
 
 /**
  * `allowedModules` keys for the two attendance modules (Req 16.1–16.4). These
@@ -32,30 +36,22 @@ export const STUDENT_ATTENDANCE_MODULE_KEY = 'studentAttendance';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 const StaffAttendanceStack = createNativeStackNavigator();
-const StudentAttendanceStack = createNativeStackNavigator();
+const LeaveManagementStack = createNativeStackNavigator();
 
 /**
- * Staff attendance sub-navigator. The home screen is wrapped in a
- * `PermissionGate` so direct navigation by an unauthorized user renders the
- * unauthorized view rather than the attendance flow (Req 16.3). Face enrollment
- * is a sibling route so the staff face-step guard can redirect to it and return
- * (Req 16.4, design "Navigation & Access Gating").
+ * Attendance sub-navigator. The home route is `AttendanceTabScreen`, which
+ * improvises a mode switcher between staff self-attendance and student
+ * roster scanning under one shared header (Req 16.3 gating is enforced inside
+ * that screen per-mode). Face enrollment stays a sibling route so the staff
+ * face-step guard can redirect to it and return (Req 16.4).
  */
-function GatedStaffAttendanceScreen() {
-  return (
-    <PermissionGate moduleKey={STAFF_ATTENDANCE_MODULE_KEY} moduleLabel="Staff Attendance">
-      <StaffAttendanceScreen />
-    </PermissionGate>
-  );
-}
-
 function StaffAttendanceNavigator() {
   return (
     <StaffAttendanceStack.Navigator screenOptions={{ headerShown: true }}>
       <StaffAttendanceStack.Screen
         name="StaffAttendanceHome"
-        component={GatedStaffAttendanceScreen}
-        options={{ title: 'Staff Attendance' }}
+        component={AttendanceTabScreen}
+        options={{ title: 'Attendance', headerShown: false }}
       />
       <StaffAttendanceStack.Screen
         name="FaceEnrollment"
@@ -66,11 +62,7 @@ function StaffAttendanceNavigator() {
   );
 }
 
-/**
- * Student attendance sub-navigator. Mirrors the staff navigator: the home
- * screen is gated (Req 16.3) and student face enrollment is a sibling route
- * (Req 16.4).
- */
+/** Gates direct navigation to Student Attendance the same way staff attendance is gated (Req 16.3). */
 function GatedStudentAttendanceScreen() {
   return (
     <PermissionGate moduleKey={STUDENT_ATTENDANCE_MODULE_KEY} moduleLabel="Student Attendance">
@@ -79,26 +71,39 @@ function GatedStudentAttendanceScreen() {
   );
 }
 
-function StudentAttendanceNavigator() {
+/**
+ * Leave management sub-navigator. The apply screen is the tab root; leave
+ * status is a pushed sibling route reached via the header's "View Status"
+ * link, mirroring the staff attendance sub-navigator pattern. Both screens
+ * render their own `GradientHeader`, so the native stack header is hidden
+ * throughout.
+ */
+function LeaveManagementNavigator() {
   return (
-    <StudentAttendanceStack.Navigator screenOptions={{ headerShown: true }}>
-      <StudentAttendanceStack.Screen
-        name="StudentAttendanceHome"
-        component={GatedStudentAttendanceScreen}
-        options={{ title: 'Student Attendance' }}
-      />
-      <StudentAttendanceStack.Screen
-        name="StudentFaceEnrollment"
-        component={StudentFaceEnrollmentScreen}
-        options={{ title: 'Student Face Enrollment' }}
-      />
-    </StudentAttendanceStack.Navigator>
+    <LeaveManagementStack.Navigator screenOptions={{ headerShown: false }}>
+      <LeaveManagementStack.Screen name="LeaveManagementHome" component={LeaveManagementScreen} />
+      <LeaveManagementStack.Screen name="LeaveStatus" component={LeaveStatusScreen} />
+    </LeaveManagementStack.Navigator>
   );
 }
 
+/** Builds a `tabBarIcon` renderer for a Feather icon name. */
+function tabIcon(name: keyof typeof Feather.glyphMap) {
+  return ({ color, size }: { color: string; size: number }) => (
+    <Feather name={name} size={size} color={color} />
+  );
+}
+
+/**
+ * Bottom tab bar — mirrors the Figma design's `BottomNav.tsx` exactly: Home,
+ * Attendance, Leave, Timetable, Profile. Every other screen (Student
+ * Attendance, Marks, Diary, Announcements, Admin Dashboard) is reached from
+ * Home's quick-action cards and pushed on top of these tabs via the root
+ * stack below — matching how the Figma mock only ever renders those five
+ * destinations as persistent nav items.
+ */
 function MainTabs() {
   const user = useAppSelector(state => state.auth.user);
-  const isAdmin = user?.role === 'admin';
   const allowedModules = user?.allowedModules ?? [];
   const canStaffAttendance = allowedModules.includes(STAFF_ATTENDANCE_MODULE_KEY);
   const canStudentAttendance = allowedModules.includes(STUDENT_ATTENDANCE_MODULE_KEY);
@@ -106,63 +111,47 @@ function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={{
-        tabBarActiveTintColor: colors.primary,
+        tabBarActiveTintColor: colors.secondary,
         tabBarInactiveTintColor: colors.textSecondary,
-        headerShown: true,
+        headerShown: false,
       }}
     >
       <Tab.Screen
-        name="Timetable"
-        component={TimeTableScreen}
-        options={{ tabBarLabel: 'Schedule' }}
+        name="Home"
+        component={HomeScreen}
+        options={{ tabBarLabel: 'Home', tabBarIcon: tabIcon('home') }}
       />
-      {canStaffAttendance && (
+      {(canStaffAttendance || canStudentAttendance) && (
         <Tab.Screen
           name="StaffAttendance"
           component={StaffAttendanceNavigator}
-          options={{ tabBarLabel: 'Staff Att.', headerShown: false }}
-        />
-      )}
-      {canStudentAttendance && (
-        <Tab.Screen
-          name="StudentAttendance"
-          component={StudentAttendanceNavigator}
-          options={{ tabBarLabel: 'Student Att.', headerShown: false }}
+          options={{ tabBarLabel: 'Attendance', tabBarIcon: tabIcon('check-circle') }}
         />
       )}
       <Tab.Screen
         name="LeaveManagement"
-        component={LeaveManagementScreen}
-        options={{ tabBarLabel: 'Leave' }}
+        component={LeaveManagementNavigator}
+        options={{ tabBarLabel: 'Leave', tabBarIcon: tabIcon('clock') }}
       />
       <Tab.Screen
-        name="StudentMarks"
-        component={StudentMarksScreen}
-        options={{ tabBarLabel: 'Marks' }}
+        name="Timetable"
+        component={TimeTableScreen}
+        options={{ tabBarLabel: 'Timetable', tabBarIcon: tabIcon('calendar') }}
       />
       <Tab.Screen
-        name="ClassDiary"
-        component={ClassDiaryScreen}
-        options={{ tabBarLabel: 'Diary' }}
+        name="Profile"
+        component={ProfileScreen}
+        options={{ tabBarLabel: 'Profile', tabBarIcon: tabIcon('user') }}
       />
-      <Tab.Screen
-        name="Announcements"
-        component={AnnouncementScreen}
-        options={{ tabBarLabel: 'Announce' }}
-      />
-      {isAdmin && (
-        <Tab.Screen
-          name="AdminDashboard"
-          component={AdminDashboardScreen}
-          options={{ tabBarLabel: 'Dashboard' }}
-        />
-      )}
     </Tab.Navigator>
   );
 }
 
 export default function AppNavigator() {
   const isAuthenticated = useAppSelector(state => state.auth.isAuthenticated);
+  const user = useAppSelector(state => state.auth.user);
+  const isAdmin = user?.role === 'admin';
+  const canStudentAttendance = (user?.allowedModules ?? []).includes(STUDENT_ATTENDANCE_MODULE_KEY);
 
   // Drive the offline-sync queue: mirror connectivity, sync on reconnect, and
   // poll while online so queued attendance clears its indicators within 5s of a
@@ -173,7 +162,33 @@ export default function AppNavigator() {
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
-          <Stack.Screen name="Main" component={MainTabs} />
+          <>
+            <Stack.Screen name="Main" component={MainTabs} />
+            {/* Reached from Home's "Student Attendance" quick-action card — not a
+                bottom tab, matching the Figma design (Req: nav parity). */}
+            {canStudentAttendance && (
+              <Stack.Screen name="StudentAttendance" component={GatedStudentAttendanceScreen} />
+            )}
+            <Stack.Screen
+              name="StudentFaceEnrollment"
+              component={StudentFaceEnrollmentScreen}
+              options={{ headerShown: true, title: 'Student Face Enrollment' }}
+            />
+            <Stack.Screen name="StudentMarks" component={StudentMarksScreen} />
+            <Stack.Screen name="ClassDiary" component={ClassDiaryScreen} />
+            <Stack.Screen
+              name="Announcements"
+              component={AnnouncementScreen}
+              options={{ headerShown: true, title: 'Announcements' }}
+            />
+            {isAdmin && (
+              <Stack.Screen
+                name="AdminDashboard"
+                component={AdminDashboardScreen}
+                options={{ headerShown: true, title: 'Admin Dashboard' }}
+              />
+            )}
+          </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />
         )}

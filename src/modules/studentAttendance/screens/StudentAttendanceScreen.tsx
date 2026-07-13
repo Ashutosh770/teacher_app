@@ -6,21 +6,25 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { borderRadius, colors, spacing, typography } from '../../../shared/theme';
+import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
 import { useAppDispatch, useAppSelector } from '../../../store';
-import { SyncStatusBadge } from '../../../shared/components';
+import { Feather } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { GradientHeader, SyncStatusBadge } from '../../../shared/components';
 import { useSyncStatus } from '../../../shared/hooks/useSyncStatus';
 import type { RosterStudent } from '../../../shared/types/attendance';
 import {
   canManuallyMark,
   isLockedByFaceMatch,
   selectRosterSummary,
+  setSelectedClass,
   setSessionState,
 } from '../state/studentAttendanceSlice';
 import {
   cancelSubmit,
   confirmSubmit,
   countUnmarked,
+  loadMockRoster,
   loadRoster,
   markManually,
   resumeScanSession,
@@ -51,7 +55,37 @@ import {
  *  - the camera-blocked message + Open Settings routing (Req 10.7), and
  *  - the pending/failed offline-sync indicators (Req 15.3, 15.5).
  */
-export default function StudentAttendanceScreen() {
+/**
+ * Demo class auto-selected when no class-selection UI has set one (Req 9.4
+ * has no picker yet). Special-cased in the load effect below so this default
+ * always seeds `loadMockRoster()` instead of the real `/roster/:classId`
+ * fetch, which has no backend and would always fail.
+ */
+const MOCK_CLASS_ID = 'X-A';
+
+/**
+ * Wraps every session-state view in the shared navy gradient header. When
+ * `embedded` is true (rendered under `AttendanceTabScreen`'s shared header +
+ * mode switcher), the screen's own header is skipped to avoid stacking two
+ * navy headers.
+ */
+function ScreenFrame({ children, embedded }: { children: React.ReactNode; embedded: boolean }) {
+  const navigation = useNavigation();
+  return (
+    <View style={styles.screen}>
+      {!embedded && <GradientHeader title="Student Attendance" onBack={() => navigation.goBack()} />}
+      <View style={styles.frameBody}>{children}</View>
+    </View>
+  );
+}
+
+export interface StudentAttendanceScreenProps {
+  /** When true, renders without its own header — used when embedded under a
+   * shared Attendance-tab header/mode-switcher (see `AttendanceTabScreen`). */
+  embedded?: boolean;
+}
+
+export default function StudentAttendanceScreen({ embedded = false }: StudentAttendanceScreenProps = {}) {
   const dispatch = useAppDispatch();
 
   const sessionState = useAppSelector(s => s.studentAttendance.sessionState);
@@ -69,14 +103,24 @@ export default function StudentAttendanceScreen() {
   const [addVisible, setAddVisible] = useState(false);
 
   // Load the roster on mount / when the selected class changes (Req 9.1, 9.4).
+  // No class-selection UI exists yet, so default to a demo class and seed its
+  // mock roster (the real `/roster/:classId` endpoint has no backend, so it
+  // always fails — MOCK_CLASS_ID is special-cased below so the auto-selected
+  // default never falls through to that real, always-failing fetch).
   useEffect(() => {
-    if (selectedClassId) {
+    if (!selectedClassId) {
+      dispatch(setSelectedClass(MOCK_CLASS_ID));
+    } else if (selectedClassId === MOCK_CLASS_ID) {
+      loadMockRoster();
+    } else {
       void loadRoster(selectedClassId);
     }
-  }, [selectedClassId]);
+  }, [selectedClassId, dispatch]);
 
   const handleRetry = useCallback(() => {
-    if (selectedClassId) {
+    if (selectedClassId === MOCK_CLASS_ID) {
+      loadMockRoster();
+    } else if (selectedClassId) {
       void loadRoster(selectedClassId);
     }
   }, [selectedClassId]);
@@ -169,120 +213,133 @@ export default function StudentAttendanceScreen() {
   // --- No class selected: nothing to load yet (Req 9.4 empty state). ---
   if (!selectedClassId) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Student Attendance</Text>
-        <Text style={styles.message}>
-          Select a class to load its roster and start attendance.
-        </Text>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.message}>
+            Select a class to load its roster and start attendance.
+          </Text>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Loading roster: spinner (Req 9.4). ---
   if (sessionState === 'loading_roster') {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.message}>Loading roster…</Text>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.message}>Loading roster…</Text>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Roster error: message + retry (Req 9.4). ---
   if (sessionState === 'roster_error') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Couldn't load roster</Text>
-        <Text style={styles.errorMessage}>
-          {error ?? 'Something went wrong while loading the roster.'}
-        </Text>
-        <TouchableOpacity
-          style={styles.retryButton}
-          onPress={handleRetry}
-          accessibilityRole="button"
-        >
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Couldn't load roster</Text>
+          <Text style={styles.errorMessage}>
+            {error ?? 'Something went wrong while loading the roster.'}
+          </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={handleRetry}
+            accessibilityRole="button"
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Scanning: full-screen scan overlay (Req 10.1, 10.6, 11.1, 11.2). ---
   if (sessionState === 'scanning') {
     return (
-      <View style={styles.container}>
-        <ScanOverlay
-          presentCount={presentCount}
-          total={summary.total}
-          lastMatch={lastMatch}
-          providerMode={providerMode}
-          onEndSession={handleEndScan}
-        />
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.container}>
+          <ScanOverlay
+            presentCount={presentCount}
+            total={summary.total}
+            lastMatch={lastMatch}
+            providerMode={providerMode}
+            onEndSession={handleEndScan}
+          />
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Scan paused: pause reason + Resume / End controls (Req 10.8, 17.4). ---
   if (sessionState === 'scan_paused') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Scan paused</Text>
-        <Text style={styles.errorMessage}>
-          {error ??
-            'The scan was paused. Your recorded attendance has been kept.'}
-        </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleResumeScan}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryButtonText}>Resume Scan</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={handleEndScan}
-          accessibilityRole="button"
-        >
-          <Text style={styles.secondaryButtonText}>End Session</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Scan paused</Text>
+          <Text style={styles.errorMessage}>
+            {error ??
+              'The scan was paused. Your recorded attendance has been kept.'}
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleResumeScan}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Resume Scan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleEndScan}
+            accessibilityRole="button"
+          >
+            <Text style={styles.secondaryButtonText}>End Session</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Camera blocked: settings routing + back to roster (Req 10.7). ---
   if (sessionState === 'scan_blocked') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Camera access required</Text>
-        <Text style={styles.errorMessage}>
-          {error ??
-            'Camera access is required to scan attendance. Enable it in settings.'}
-        </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleOpenSettings}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryButtonText}>Open Settings</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={handleBackToRoster}
-          accessibilityRole="button"
-        >
-          <Text style={styles.secondaryButtonText}>Back to Roster</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Camera access required</Text>
+          <Text style={styles.errorMessage}>
+            {error ??
+              'Camera access is required to scan attendance. Enable it in settings.'}
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleOpenSettings}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Open Settings</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleBackToRoster}
+            accessibilityRole="button"
+          >
+            <Text style={styles.secondaryButtonText}>Back to Roster</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Submitting: spinner (Req 14.1). ---
   if (sessionState === 'submitting') {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.message}>Submitting attendance…</Text>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.message}>Submitting attendance…</Text>
+        </View>
+      </ScreenFrame>
     );
   }
 
@@ -290,154 +347,181 @@ export default function StudentAttendanceScreen() {
   if (sessionState === 'confirm_unmarked') {
     const unmarked = countUnmarked(roster);
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Unmarked students</Text>
-        <Text style={styles.message}>
-          {unmarked} student{unmarked === 1 ? '' : 's'} will be submitted as
-          unmarked. Submit anyway?
-        </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleConfirmSubmit}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryButtonText}>Confirm & Submit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={handleCancelSubmit}
-          accessibilityRole="button"
-        >
-          <Text style={styles.secondaryButtonText}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Unmarked students</Text>
+          <Text style={styles.message}>
+            {unmarked} student{unmarked === 1 ? '' : 's'} will be submitted as
+            unmarked. Submit anyway?
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleConfirmSubmit}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Confirm & Submit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleCancelSubmit}
+            accessibilityRole="button"
+          >
+            <Text style={styles.secondaryButtonText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Submitted successfully (Req 14.1). ---
   if (sessionState === 'done') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Attendance submitted</Text>
-        <Text style={styles.successMessage}>
-          The class attendance has been saved.
-        </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleBackToRoster}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryButtonText}>Back to Roster</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Attendance submitted</Text>
+          <Text style={styles.successMessage}>
+            The class attendance has been saved.
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleBackToRoster}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Back to Roster</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Queued offline for later sync (Req 14.5, 15.3). ---
   if (sessionState === 'pending_sync') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Saved offline</Text>
-        <Text style={styles.message}>
-          You're offline. The attendance was queued and will sync automatically
-          when the connection returns.
-        </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleBackToRoster}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryButtonText}>Back to Roster</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Saved offline</Text>
+          <Text style={styles.message}>
+            You're offline. The attendance was queued and will sync automatically
+            when the connection returns.
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleBackToRoster}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Back to Roster</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Submission failed: message + retry (Req 17.5). ---
   if (sessionState === 'submit_error') {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Submission failed</Text>
-        <Text style={styles.errorMessage}>
-          {error ?? 'Failed to submit attendance. Please try again.'}
-        </Text>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleSubmit}
-          accessibilityRole="button"
-        >
-          <Text style={styles.primaryButtonText}>Retry Submit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={handleBackToRoster}
-          accessibilityRole="button"
-        >
-          <Text style={styles.secondaryButtonText}>Back to Roster</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenFrame embedded={embedded}>
+        <View style={styles.centered}>
+          <Text style={styles.title}>Submission failed</Text>
+          <Text style={styles.errorMessage}>
+            {error ?? 'Failed to submit attendance. Please try again.'}
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleSubmit}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Retry Submit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleBackToRoster}
+            accessibilityRole="button"
+          >
+            <Text style={styles.secondaryButtonText}>Back to Roster</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenFrame>
     );
   }
 
   // --- Default: roster review (roster_ready). ---
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Student Attendance</Text>
+    <ScreenFrame embedded={embedded}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.rosterTitle}>Class Roster</Text>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => setAddVisible(true)}
+            accessibilityRole="button"
+          >
+            <Feather name="user-plus" size={14} color={colors.secondary} />
+            <Text style={styles.addButtonText}>Add Student</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Pending/failed offline-sync indicators for this module (Req 15.3, 15.5). */}
+        <SyncStatusBadge
+          pending={syncStatus.pending}
+          failed={syncStatus.failed}
+          style={styles.syncRow}
+        />
+
+        <StatsCard summary={summary} />
+
+        {/* Start Batch Scan control (roster_ready). The service handles camera
+            permission + provider mode + preview startup (Req 10.1). */}
         <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setAddVisible(true)}
+          style={styles.scanButton}
+          onPress={handleStartScan}
           accessibilityRole="button"
         >
-          <Text style={styles.addButtonText}>+ Add Student</Text>
+          <Feather name="camera" size={20} color={colors.surface} />
+          <Text style={styles.scanButtonText}>Start Batch Face Scan</Text>
         </TouchableOpacity>
+
+        {/* Roster list with manual present/absent controls wired via
+            renderStatusControl (Req 12.1, 12.3). */}
+        <View style={styles.listWrap}>
+          <RosterList roster={roster} renderStatusControl={renderStatusControl} />
+        </View>
+
+        {/* Submit Attendance (Req 14.2). Blocks on unmarked entries via the
+            confirm_unmarked prompt above. */}
+        <TouchableOpacity
+          style={styles.submitButton}
+          onPress={handleSubmit}
+          accessibilityRole="button"
+          disabled={roster.length === 0}
+        >
+          <Text style={styles.submitButtonText}>Submit Attendance</Text>
+        </TouchableOpacity>
+
+        <View style={styles.infoBanner}>
+          <Text style={styles.infoBannerText}>
+            <Text style={styles.infoBannerBold}>Tip: </Text>
+            Use batch scan mode for quick face verification. Students without face
+            enrollment can be marked manually.
+          </Text>
+        </View>
+
+        <AddStudentModal
+          visible={addVisible}
+          onClose={() => setAddVisible(false)}
+        />
       </View>
-
-      {/* Pending/failed offline-sync indicators for this module (Req 15.3, 15.5). */}
-      <SyncStatusBadge
-        pending={syncStatus.pending}
-        failed={syncStatus.failed}
-        style={styles.syncRow}
-      />
-
-      <StatsCard summary={summary} />
-
-      {/* Start Batch Scan control (roster_ready). The service handles camera
-          permission + provider mode + preview startup (Req 10.1). */}
-      <TouchableOpacity
-        style={styles.scanButton}
-        onPress={handleStartScan}
-        accessibilityRole="button"
-      >
-        <Text style={styles.scanButtonText}>Start Batch Scan</Text>
-      </TouchableOpacity>
-
-      {/* Roster list with manual present/absent controls wired via
-          renderStatusControl (Req 12.1, 12.3). */}
-      <View style={styles.listWrap}>
-        <RosterList roster={roster} renderStatusControl={renderStatusControl} />
-      </View>
-
-      {/* Submit Attendance (Req 14.2). Blocks on unmarked entries via the
-          confirm_unmarked prompt above. */}
-      <TouchableOpacity
-        style={styles.submitButton}
-        onPress={handleSubmit}
-        accessibilityRole="button"
-        disabled={roster.length === 0}
-      >
-        <Text style={styles.submitButtonText}>Submit Attendance</Text>
-      </TouchableOpacity>
-
-      <AddStudentModal
-        visible={addVisible}
-        onClose={() => setAddVisible(false)}
-      />
-    </View>
+    </ScreenFrame>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  frameBody: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -457,6 +541,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   title: {
+    ...typography.h2,
+    color: colors.text,
+  },
+  rosterTitle: {
     ...typography.h2,
     color: colors.text,
   },
@@ -521,43 +609,73 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
+    borderRadius: borderRadius.full,
+    backgroundColor: withAlpha(colors.secondary, 0.1),
   },
   addButtonText: {
     ...typography.caption,
-    color: colors.primary,
-    fontWeight: '600',
+    color: colors.secondary,
+    fontWeight: '700',
   },
   scanButton: {
-    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    backgroundColor: colors.secondary,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
   },
   scanButtonText: {
     ...typography.body,
     color: colors.surface,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   submitButton: {
-    backgroundColor: colors.success,
+    backgroundColor: colors.secondary,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
     marginTop: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
   },
   submitButtonText: {
     ...typography.body,
     color: colors.surface,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   listWrap: {
     flex: 1,
+  },
+  infoBanner: {
+    marginTop: spacing.lg,
+    backgroundColor: withAlpha(colors.blue, 0.08),
+    borderLeftWidth: 4,
+    borderLeftColor: colors.blue,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+  },
+  infoBannerText: {
+    ...typography.caption,
+    color: colors.text,
+  },
+  infoBannerBold: {
+    fontWeight: '700',
   },
   // Manual marking controls (Req 12.1).
   markControl: {

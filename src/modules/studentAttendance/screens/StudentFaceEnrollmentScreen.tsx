@@ -8,11 +8,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Camera, useCameraDevice } from 'react-native-vision-camera';
+import { Feather } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
 import {
   faceEnrollmentService,
   type EnrollmentResult,
 } from '../../../shared/services/faceEnrollment';
+import { faceCaptureService } from '../../../shared/services/faceCapture';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
 import { useAppDispatch } from '../../../store';
 import { setStudentEnrollmentStatus } from '../state/studentAttendanceSlice';
@@ -76,6 +79,21 @@ export default function StudentFaceEnrollmentScreen(
   // promise's resolve fn so the modal buttons can settle the teacher's choice.
   const [confirmVisible, setConfirmVisible] = useState(false);
   const confirmResolver = useRef<((confirmed: boolean) => void) | null>(null);
+
+  // Real camera preview + capture binding (Req 8.1). Without this,
+  // `faceEnrollmentService.enroll()` always fails with "Camera is not
+  // attached" since `captureFrame()` requires a mounted `<Camera>` ref. Back
+  // camera, since the teacher points the device at the student.
+  const cameraRef = useRef<Camera>(null);
+  const device = useCameraDevice('back');
+  useEffect(() => {
+    if (cameraRef.current) {
+      faceCaptureService.attachCamera(cameraRef.current);
+    }
+    return () => {
+      faceCaptureService.detachCamera();
+    };
+  }, [device]);
 
   // Reflect whether a record already exists so we can show a re-enrollment
   // control and require confirm-before-replace (Req 8.6).
@@ -224,6 +242,16 @@ export default function StudentFaceEnrollmentScreen(
     <View style={styles.container}>
       <Text style={styles.title}>Student Face Enrollment</Text>
 
+      <View style={styles.cameraPanel}>
+        {device ? (
+          <Camera ref={cameraRef} style={StyleSheet.absoluteFill} device={device} isActive photo />
+        ) : (
+          <View style={styles.cameraFallback}>
+            <Feather name="camera" size={32} color={colors.disabled} />
+          </View>
+        )}
+      </View>
+
       <View style={styles.studentCard}>
         <Text style={styles.studentName}>{student.name}</Text>
         <Text style={styles.studentRoll}>Roll No: {student.rollNo}</Text>
@@ -338,6 +366,18 @@ const styles = StyleSheet.create({
     ...typography.h2,
     color: colors.text,
     marginBottom: spacing.lg,
+  },
+  cameraPanel: {
+    height: 240,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: '#1A202C',
+    marginBottom: spacing.lg,
+  },
+  cameraFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   studentCard: {
     backgroundColor: colors.surface,

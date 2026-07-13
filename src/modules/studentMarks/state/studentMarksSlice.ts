@@ -31,10 +31,23 @@ const studentMarksSlice = createSlice({
     setAssessments(state, action: PayloadAction<Assessment[]>) {
       state.assessments = action.payload;
     },
-    updateMark(state, action: PayloadAction<{ id: string; mark: number }>) {
+    updateMark(
+      state,
+      action: PayloadAction<{
+        id: string;
+        component: 'theoryMark' | 'practicalMark' | 'internalMark';
+        value: number | null;
+      }>
+    ) {
       const existing = state.marks.find(m => m.id === action.payload.id);
       if (existing) {
-        existing.mark = action.payload.mark;
+        existing[action.payload.component] = action.payload.value;
+      }
+    },
+    setAssessmentStatus(state, action: PayloadAction<{ id: string; status: 'draft' | 'submitted' }>) {
+      const assessment = state.assessments.find(a => a.id === action.payload.id);
+      if (assessment) {
+        assessment.status = action.payload.status;
       }
     },
     setSelectedClass(state, action: PayloadAction<string | null>) {
@@ -59,6 +72,7 @@ export const {
   setMarks,
   setAssessments,
   updateMark,
+  setAssessmentStatus,
   setSelectedClass,
   setSelectedSubject,
   setLoading,

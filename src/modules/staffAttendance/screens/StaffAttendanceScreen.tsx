@@ -19,6 +19,7 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAppSelector } from '../../../store';
 import { colors, spacing, typography } from '../../../shared/theme';
+import { GradientHeader } from '../../../shared/components';
 import { staffAttendanceService } from '../services/staffAttendanceService';
 import { useStaffEnrollmentGuard } from '../services/staffEnrollmentGuard';
 import type { StaffFlowState } from '../state/staffAttendanceSlice';
@@ -69,7 +70,13 @@ function stepFor(flowState: StaffFlowState): StepKind {
   return 'loading';
 }
 
-export default function StaffAttendanceScreen(): React.ReactElement {
+export interface StaffAttendanceScreenProps {
+  /** When true, renders without its own header — used when embedded under a
+   * shared Attendance-tab header/mode-switcher (see `AttendanceTabScreen`). */
+  embedded?: boolean;
+}
+
+export default function StaffAttendanceScreen({ embedded = false }: StaffAttendanceScreenProps = {}): React.ReactElement {
   const flowState = useAppSelector((s) => s.staffAttendance.flowState);
 
   // Enforce the enrollment guard, then begin the flow. When enrollment is
@@ -99,24 +106,23 @@ export default function StaffAttendanceScreen(): React.ReactElement {
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
-      {step === 'loading' ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Preparing attendance…</Text>
-        </View>
-      ) : step === 'gps' ? (
-        <GpsStep />
-      ) : step === 'face' ? (
-        <FaceStep />
-      ) : (
-        <SuccessStep />
-      )}
-    </ScrollView>
+    <View style={styles.screen}>
+      {!embedded && <GradientHeader title="Mark Attendance" />}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {step === 'loading' ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.loadingText}>Preparing attendance…</Text>
+          </View>
+        ) : step === 'gps' ? (
+          <GpsStep />
+        ) : step === 'face' ? (
+          <FaceStep />
+        ) : (
+          <SuccessStep />
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
