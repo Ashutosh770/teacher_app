@@ -42,7 +42,7 @@ export default function StudentMarksScreen() {
   const marks = useAppSelector(s => s.studentMarks.marks);
 
   useEffect(() => {
-    loadMarksData(selectedClass, selectedSubject);
+    void loadMarksData(selectedClass, selectedSubject);
   }, [selectedClass, selectedSubject]);
 
   const currentExamConfig = EXAM_TYPES.find(e => e.code === selectedExam)!;

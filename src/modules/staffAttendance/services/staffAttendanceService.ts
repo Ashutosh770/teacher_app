@@ -557,7 +557,7 @@ export class StaffAttendanceService {
 
       let response: { success: boolean; error?: string };
       try {
-        response = await this.deps.api.post('/attendance/staff', record);
+        response = await this.deps.api.post('/staff-attendance/mark', record);
       } catch {
         response = { success: false, error: 'Network error' };
       }
@@ -649,7 +649,7 @@ export class StaffAttendanceService {
 
     try {
       const response = await this.deps.api.get<StaffAttendanceRecord | null>(
-        `/attendance/staff/today?personId=${encodeURIComponent(user.id)}&date=${encodeURIComponent(date)}`,
+        `/staff-attendance/today?date=${encodeURIComponent(date)}`,
       );
       if (response.success && response.data) {
         return response.data;
@@ -692,7 +692,7 @@ export class StaffAttendanceService {
  */
 async function loadSchoolLocationDefault(): Promise<SchoolLocation | null> {
   try {
-    const response = await apiService.get<SchoolLocation>('/config/school-location');
+    const response = await apiService.get<SchoolLocation>('/staff-attendance/school-location');
     if (response.success && response.data) {
       await appStorage.set(SCHOOL_LOCATION_STORAGE_KEY, response.data);
       return response.data;

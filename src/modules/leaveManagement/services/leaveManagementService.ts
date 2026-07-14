@@ -1,16 +1,11 @@
 /**
  * Leave management service — owns loading leave balances/requests and
  * submitting new applications, keeping that logic out of the screen
- * components (mirrors the `studentAttendanceService` pattern).
- *
- * There is no backend yet (`shared/services/api.ts` points at a placeholder
- * URL), so this is a self-contained mock data source, the same approach
- * `mockAuthService` uses for auth. Swapping in a real API is a matter of
- * replacing the bodies of `loadLeaveData`/`submitLeaveRequest` with
- * `apiService` calls — the dispatch shape below is already what a real
- * fetch would populate.
+ * components (mirrors the `studentAttendanceService` pattern). Backed by the
+ * real `/leave-management` endpoints.
  */
 import { store } from '../../../store';
+import { apiService } from '../../../shared/services/api';
 import type { LeaveRequest } from '../../../shared/types';
 import { setBalances, setError, setLoading, setRequests, setSubmitting, addRequest } from '../state/leaveManagementSlice';
 
@@ -21,60 +16,62 @@ export const LEAVE_TYPES = [
   { code: 'ML', name: 'Maternity Leave' },
 ] as const;
 
-function generateRequestId(): string {
-  return `leave-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+interface BackendLeave {
+  id: string;
+  userId: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
 }
 
-let loaded = false;
+interface BackendBalance {
+  id: string;
+  userId: string;
+  type: string;
+  total: number;
+  used: number;
+}
 
-/** Seeds leave balances + requests into the store on first entry to the module. */
-export function loadLeaveData(): void {
-  if (loaded) return;
-  loaded = true;
+function toLeaveRequest(leave: BackendLeave): LeaveRequest {
+  return {
+    id: leave.id,
+    userId: leave.userId,
+    leaveType: leave.type,
+    startDate: leave.startDate,
+    endDate: leave.endDate,
+    reason: leave.reason,
+    status: leave.status,
+    submittedAt: leave.createdAt,
+  };
+}
 
+/** Fetches leave balances + requests for the signed-in user. */
+export async function loadLeaveData(): Promise<void> {
   store.dispatch(setLoading(true));
-  store.dispatch(
-    setBalances([
-      { type: 'CL', total: 12, used: 3, remaining: 9 },
-      { type: 'EL', total: 15, used: 5, remaining: 10 },
-      { type: 'SL', total: 10, used: 2, remaining: 8 },
-      { type: 'ML', total: 0, used: 0, remaining: 0 },
-    ])
+  const response = await apiService.get<{ requests: BackendLeave[]; balances: BackendBalance[] }>(
+    '/leave-management'
   );
+  if (!response.success || !response.data) {
+    store.dispatch(setError(response.error ?? 'Failed to load leave data'));
+    store.dispatch(setLoading(false));
+    return;
+  }
+
+  store.dispatch(setRequests(response.data.requests.map(toLeaveRequest)));
   store.dispatch(
-    setRequests([
-      {
-        id: 'leave-seed-1',
-        userId: 'self',
-        leaveType: 'CL',
-        startDate: '2026-04-25',
-        endDate: '2026-04-26',
-        reason: 'Family function',
-        status: 'pending',
-        submittedAt: '2026-04-10T09:00:00.000Z',
-      },
-      {
-        id: 'leave-seed-2',
-        userId: 'self',
-        leaveType: 'SL',
-        startDate: '2026-03-28',
-        endDate: '2026-03-29',
-        reason: 'Fever',
-        status: 'approved',
-        submittedAt: '2026-03-27T09:00:00.000Z',
-      },
-      {
-        id: 'leave-seed-3',
-        userId: 'self',
-        leaveType: 'CL',
-        startDate: '2026-02-22',
-        endDate: '2026-02-22',
-        reason: 'Personal',
-        status: 'rejected',
-        submittedAt: '2026-02-20T09:00:00.000Z',
-      },
-    ])
+    setBalances(
+      response.data.balances.map(b => ({
+        type: b.type,
+        total: b.total,
+        used: b.used,
+        remaining: b.total - b.used,
+      }))
+    )
   );
+  store.dispatch(setError(null));
   store.dispatch(setLoading(false));
 }
 
@@ -88,7 +85,7 @@ export interface SubmitLeaveInput {
 export type SubmitLeaveResult = { ok: true } | { ok: false; error: string };
 
 /** Validates and submits a new leave application (Req: apply-leave form). */
-export function submitLeaveRequest(input: SubmitLeaveInput): SubmitLeaveResult {
+export async function submitLeaveRequest(input: SubmitLeaveInput): Promise<SubmitLeaveResult> {
   if (!input.leaveType) {
     return { ok: false, error: 'Select a leave type.' };
   }
@@ -103,18 +100,23 @@ export function submitLeaveRequest(input: SubmitLeaveInput): SubmitLeaveResult {
   }
 
   store.dispatch(setSubmitting(true));
-  const request: LeaveRequest = {
-    id: generateRequestId(),
-    userId: 'self',
+  const response = await apiService.post<BackendLeave>('/leave-management', {
     leaveType: input.leaveType,
     startDate: input.startDate,
     endDate: input.endDate,
     reason: input.reason.trim(),
-    status: 'pending',
-    submittedAt: new Date().toISOString(),
-  };
-  store.dispatch(addRequest(request));
+  });
   store.dispatch(setSubmitting(false));
+
+  if (!response.success || !response.data) {
+    const error = response.error ?? 'Failed to submit leave request';
+    store.dispatch(setError(error));
+    return { ok: false, error };
+  }
+
+  store.dispatch(addRequest(toLeaveRequest(response.data)));
+  // Re-fetch balances since the server reserved the requested days against them.
+  void loadLeaveData();
   store.dispatch(setError(null));
   return { ok: true };
 }

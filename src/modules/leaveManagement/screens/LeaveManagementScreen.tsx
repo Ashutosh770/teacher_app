@@ -28,13 +28,13 @@ export default function LeaveManagementScreen() {
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    loadLeaveData();
+    void loadLeaveData();
   }, []);
 
   const selectedBalance = balances.find(b => b.type === leaveType);
 
-  const handleSubmit = () => {
-    const result = submitLeaveRequest({ leaveType, startDate, endDate, reason });
+  const handleSubmit = async () => {
+    const result = await submitLeaveRequest({ leaveType, startDate, endDate, reason });
     if (!result.ok) {
       setFormError(result.error);
       return;

@@ -42,7 +42,7 @@ export default function ClassDiaryScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadDiaryEntries();
+    void loadDiaryEntries();
   }, []);
 
   const resetForm = () => {
@@ -52,9 +52,9 @@ export default function ClassDiaryScreen() {
     setError(null);
   };
 
-  const handlePost = () => {
+  const handlePost = async () => {
     const selectedClass = CLASSES[classIndex];
-    const result = postDiaryEntry({
+    const result = await postDiaryEntry({
       classId: selectedClass.id,
       className: selectedClass.name,
       subject: SUBJECTS[subjectIndex],
@@ -73,7 +73,7 @@ export default function ClassDiaryScreen() {
   const handleDelete = (entry: DiaryEntry) => {
     Alert.alert('Delete entry?', 'This diary entry will be permanently removed.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => removeDiaryEntry(entry.id) },
+      { text: 'Delete', style: 'destructive', onPress: () => void removeDiaryEntry(entry.id) },
     ]);
   };
 

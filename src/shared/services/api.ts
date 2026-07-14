@@ -1,6 +1,11 @@
 import { ApiResponse } from '../types';
 
-const BASE_URL = 'https://api.teacherapp.example.com'; // Replace with actual API URL
+// Expo only inlines env vars prefixed EXPO_PUBLIC_ into the client bundle
+// (static `process.env.EXPO_PUBLIC_*` access is required for the bundler to
+// substitute it — no babel/metro config needed on SDK 57+). Falls back to the
+// documented localhost default so a missing .env doesn't silently point at
+// nothing.
+const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:5000/api/v1';
 
 class ApiService {
   private token: string | null = null;
@@ -34,7 +39,9 @@ class ApiService {
         return { success: false, error: data.message || 'Request failed' };
       }
 
-      return { success: true, data };
+      // Backend envelope is `{ success, data }` on success — unwrap so callers
+      // get the inner payload directly as ApiResponse<T>'s `data`.
+      return { success: true, data: data.data ?? data };
     } catch (error) {
       return { success: false, error: 'Network error' };
     }
@@ -47,6 +54,13 @@ class ApiService {
   async post<T>(endpoint: string, body: unknown): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, {
       method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async patch<T>(endpoint: string, body: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: 'PATCH',
       body: JSON.stringify(body),
     });
   }

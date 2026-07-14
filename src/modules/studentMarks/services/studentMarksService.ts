@@ -1,12 +1,12 @@
 /**
- * Student marks service — owns the exam-type taxonomy, mock data seeding, and
- * mark/grade calculations, keeping that logic out of the screen component
- * (mirrors `leaveManagementService`). There is no backend yet, so this seeds
- * a self-contained mock roster the same way `mockAuthService` mocks auth.
+ * Student marks service — owns the exam-type taxonomy and mark/grade
+ * calculations client-side, and the real `/student-marks` fetch/update calls
+ * server-side (mirrors `leaveManagementService`).
  */
 import { store } from '../../../store';
+import { apiService } from '../../../shared/services/api';
 import type { Assessment, ExamTypeCode, StudentMark } from '../../../shared/types';
-import { setAssessments, setAssessmentStatus, setMarks, updateMark } from '../state/studentMarksSlice';
+import { setAssessments, setAssessmentStatus, setLoading, setMarks, updateMark } from '../state/studentMarksSlice';
 
 export interface ExamTypeConfig {
   code: ExamTypeCode;
@@ -25,7 +25,7 @@ export const EXAM_TYPES: ExamTypeConfig[] = [
   { code: 'ANN', name: 'Annual Exam', maxMarks: 80, color: '#E74C3C' },
 ];
 
-/** Per-component input caps, matching the Figma mock's input `max` attributes. */
+/** Per-component input caps — must match the backend's `componentMax()`. */
 export function componentMax(examCode: ExamTypeCode): { theory: number; practical: number; internal: number } {
   return { theory: examCode === 'MT' ? 20 : 70, practical: 20, internal: 10 };
 }
@@ -57,71 +57,98 @@ export function gradeFor(mark: StudentMark, maxScore: number): string {
   return GRADE_BANDS.find(band => percentage >= band.min)?.grade ?? '-';
 }
 
-const seededKeys = new Set<string>();
-
-/** Seeds mock assessments (one per exam type) + a mock roster's marks for a class/subject. */
-export function loadMarksData(classId: string, subjectId: string): void {
-  const key = `${classId}::${subjectId}`;
-  if (seededKeys.has(key)) return;
-  seededKeys.add(key);
-
-  const assessments: Assessment[] = EXAM_TYPES.map(exam => ({
-    id: `assessment-${key}-${exam.code}`,
-    name: exam.name,
-    type: exam.code,
-    maxScore: exam.maxMarks,
-    subjectId,
-    classId,
-    status: 'draft',
-  }));
-
-  const rosterSeed: Array<{ name: string; rollNo: string; theory: number | null; practical: number | null; internal: number | null }> = [
-    { name: 'Aarav Kumar', rollNo: '01', theory: 68, practical: 18, internal: 8 },
-    { name: 'Diya Patel', rollNo: '02', theory: 72, practical: 19, internal: 9 },
-    { name: 'Arjun Singh', rollNo: '03', theory: 65, practical: 17, internal: 8 },
-    { name: 'Ananya Sharma', rollNo: '04', theory: null, practical: null, internal: null },
-    { name: 'Vihaan Gupta', rollNo: '05', theory: 58, practical: 16, internal: 7 },
-  ];
-
-  const marks: StudentMark[] = assessments.flatMap(assessment =>
-    rosterSeed.map((student, index) => ({
-      id: `mark-${assessment.id}-${index}`,
-      studentId: `student-${key}-${index}`,
-      studentName: student.name,
-      assessmentId: assessment.id,
-      // Only the default-visible exam (PT-1) ships pre-filled sample marks;
-      // every other exam type starts blank so the "Draft"/pending state reads
-      // truthfully rather than looking pre-completed everywhere.
-      theoryMark: assessment.type === 'PT-1' ? student.theory : null,
-      practicalMark: assessment.type === 'PT-1' ? student.practical : null,
-      internalMark: assessment.type === 'PT-1' ? student.internal : null,
-    }))
-  );
-
-  store.dispatch(setAssessments([...store.getState().studentMarks.assessments, ...assessments]));
-  store.dispatch(setMarks([...store.getState().studentMarks.marks, ...marks]));
+interface BackendStudent {
+  id: string;
+  name: string;
+  rollNo: string;
 }
 
-export function updateMarkValue(
+interface BackendAssessment {
+  id: string;
+  classId: string;
+  subject: string;
+  examType: ExamTypeCode;
+  maxTheory: number;
+  maxPractical: number;
+  maxInternal: number;
+  status: 'draft' | 'submitted';
+}
+
+interface BackendStudentMark {
+  id: string;
+  assessmentId: string;
+  studentId: string;
+  theoryMark: number | null;
+  practicalMark: number | null;
+  internalMark: number | null;
+}
+
+function toAssessment(a: BackendAssessment): Assessment {
+  return {
+    id: a.id,
+    name: EXAM_TYPES.find(e => e.code === a.examType)?.name ?? a.examType,
+    type: a.examType,
+    maxScore: a.maxTheory + a.maxPractical + a.maxInternal,
+    subjectId: a.subject,
+    classId: a.classId,
+    status: a.status,
+  };
+}
+
+/** Fetches (auto-seeding server-side) all exam-type assessments + marks for a class/subject. */
+export async function loadMarksData(classId: string, subject: string): Promise<void> {
+  store.dispatch(setLoading(true));
+  const response = await apiService.get<{
+    students: BackendStudent[];
+    assessments: BackendAssessment[];
+    marks: BackendStudentMark[];
+  }>(`/student-marks?classId=${encodeURIComponent(classId)}&subject=${encodeURIComponent(subject)}`);
+
+  if (!response.success || !response.data) {
+    store.dispatch(setLoading(false));
+    return;
+  }
+
+  const studentNameById = new Map(response.data.students.map(s => [s.id, s.name]));
+  const marks: StudentMark[] = response.data.marks.map(m => ({
+    id: m.id,
+    studentId: m.studentId,
+    studentName: studentNameById.get(m.studentId) ?? 'Unknown student',
+    assessmentId: m.assessmentId,
+    theoryMark: m.theoryMark,
+    practicalMark: m.practicalMark,
+    internalMark: m.internalMark,
+  }));
+
+  store.dispatch(setAssessments(response.data.assessments.map(toAssessment)));
+  store.dispatch(setMarks(marks));
+  store.dispatch(setLoading(false));
+}
+
+export async function updateMarkValue(
   markId: string,
   component: 'theoryMark' | 'practicalMark' | 'internalMark',
   rawValue: string,
   max: number
-): void {
+): Promise<void> {
   if (rawValue.trim() === '') {
     store.dispatch(updateMark({ id: markId, component, value: null }));
+    void apiService.patch(`/student-marks/${markId}`, { component, value: null });
     return;
   }
   const parsed = Number(rawValue);
   if (Number.isNaN(parsed)) return;
   const clamped = Math.max(0, Math.min(max, parsed));
   store.dispatch(updateMark({ id: markId, component, value: clamped }));
+  void apiService.patch(`/student-marks/${markId}`, { component, value: clamped });
 }
 
 export function submitForReview(assessmentId: string): void {
   store.dispatch(setAssessmentStatus({ id: assessmentId, status: 'submitted' }));
+  void apiService.patch(`/student-marks/assessment/${assessmentId}/status`, { status: 'submitted' });
 }
 
 export function saveDraft(assessmentId: string): void {
   store.dispatch(setAssessmentStatus({ id: assessmentId, status: 'draft' }));
+  void apiService.patch(`/student-marks/assessment/${assessmentId}/status`, { status: 'draft' });
 }

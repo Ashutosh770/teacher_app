@@ -1,62 +1,58 @@
 /**
- * Class diary service — owns mock entry seeding, posting, and the 24h
+ * Class diary service — owns loading entries, posting, and the 24h
  * edit/delete lock window, keeping that logic out of the screen component
- * (mirrors `leaveManagementService`). There is no backend yet, so this is a
- * self-contained mock data source, the same approach `mockAuthService` uses.
+ * (mirrors `leaveManagementService`). Backed by the real `/class-diary`
+ * endpoints; the 24h window is enforced both here (for the UI) and
+ * server-side (`ClassDiaryService.deleteDiary`).
  */
 import { store } from '../../../store';
+import { apiService } from '../../../shared/services/api';
 import type { DiaryEntry } from '../../../shared/types';
 import { addEntry, deleteEntry, setEntries } from '../state/classDiarySlice';
 
 /** Entries can be edited/deleted for this long after posting, then lock. */
 export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-let seeded = false;
+interface BackendDiaryEntry {
+  id: string;
+  teacherId: string;
+  classId: string;
+  subject: string;
+  topic: string;
+  description: string | null;
+  homework: string | null;
+  attachmentName: string | null;
+  attachmentUrl: string | null;
+  date: string;
+  createdAt: string;
+}
 
-/** Seeds a few mock diary entries so the screen isn't empty on first load. */
-export function loadDiaryEntries(): void {
-  if (seeded) return;
-  seeded = true;
+function classNameFor(classId: string): string {
+  return `Class ${classId}`;
+}
 
-  const now = Date.now();
-  const entries: DiaryEntry[] = [
-    {
-      id: 'diary-seed-1',
-      date: '2026-04-12',
-      classId: 'X-A',
-      className: 'Class X-A',
-      subject: 'Mathematics',
-      topicsCovered: 'Complete exercises 3.1 to 3.5 from Chapter 3: Quadratic Equations.',
-      homework: 'Practice word problems especially.',
-      isFinalized: false,
-      postedAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-      attachmentName: 'worksheet_ch3.pdf',
-    },
-    {
-      id: 'diary-seed-2',
-      date: '2026-04-11',
-      classId: 'IX-A',
-      className: 'Class IX-A',
-      subject: 'Algebra',
-      topicsCovered: 'Solve all problems from Exercise 2.3.',
-      homework: 'Prepare for unit test next week on Linear Equations.',
-      isFinalized: true,
-      postedAt: new Date(now - 30 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 'diary-seed-3',
-      date: '2026-04-10',
-      classId: 'X-B',
-      className: 'Class X-B',
-      subject: 'Geometry',
-      topicsCovered: 'Study theorems from Chapter 6: Triangles.',
-      homework: 'Draw diagrams for all theorems in your notebook.',
-      isFinalized: true,
-      postedAt: new Date(now - 50 * 60 * 60 * 1000).toISOString(),
-      attachmentName: 'triangle_theorems.pdf',
-    },
-  ];
-  store.dispatch(setEntries(entries));
+function toDiaryEntry(entry: BackendDiaryEntry): DiaryEntry {
+  return {
+    id: entry.id,
+    date: entry.date,
+    classId: entry.classId,
+    className: classNameFor(entry.classId),
+    subject: entry.subject,
+    topicsCovered: entry.topic,
+    homework: entry.homework ?? undefined,
+    isFinalized: false,
+    postedAt: entry.createdAt,
+    attachmentName: entry.attachmentName ?? undefined,
+  };
+}
+
+/** Fetches diary entries for the signed-in teacher. */
+export async function loadDiaryEntries(): Promise<void> {
+  const response = await apiService.get<BackendDiaryEntry[]>('/class-diary');
+  if (!response.success || !response.data) {
+    return;
+  }
+  store.dispatch(setEntries(response.data.map(toDiaryEntry)));
 }
 
 export interface NewDiaryEntryInput {
@@ -71,32 +67,34 @@ export interface NewDiaryEntryInput {
 
 export type PostEntryResult = { ok: true } | { ok: false; error: string };
 
-function generateEntryId(): string {
-  return `diary-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-export function postDiaryEntry(input: NewDiaryEntryInput): PostEntryResult {
+/** Posts a new diary entry (Req: create-entry form). */
+export async function postDiaryEntry(input: NewDiaryEntryInput): Promise<PostEntryResult> {
   if (!input.topicsCovered.trim() && !input.homework.trim()) {
     return { ok: false, error: 'Enter homework or class notes.' };
   }
-  const entry: DiaryEntry = {
-    id: generateEntryId(),
-    date: input.date,
+
+  const response = await apiService.post<BackendDiaryEntry>('/class-diary', {
     classId: input.classId,
-    className: input.className,
     subject: input.subject,
-    topicsCovered: input.topicsCovered.trim(),
+    topic: input.topicsCovered.trim(),
     homework: input.homework.trim() || undefined,
-    isFinalized: false,
-    postedAt: new Date().toISOString(),
     attachmentName: input.attachmentName,
-  };
-  store.dispatch(addEntry(entry));
+    date: input.date,
+  });
+
+  if (!response.success || !response.data) {
+    return { ok: false, error: response.error ?? 'Failed to post diary entry' };
+  }
+
+  store.dispatch(addEntry(toDiaryEntry(response.data)));
   return { ok: true };
 }
 
-export function removeDiaryEntry(id: string): void {
-  store.dispatch(deleteEntry(id));
+export async function removeDiaryEntry(id: string): Promise<void> {
+  const response = await apiService.delete(`/class-diary/${id}`);
+  if (response.success) {
+    store.dispatch(deleteEntry(id));
+  }
 }
 
 /** Whether an entry is still within its 24h edit/delete window. */

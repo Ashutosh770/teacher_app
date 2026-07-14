@@ -44,7 +44,7 @@ export default function HomeScreen() {
   const leaveBalances = useAppSelector(s => s.leaveManagement.balances);
 
   useEffect(() => {
-    loadLeaveData();
+    void loadLeaveData();
   }, []);
 
   const todaySchedule = useMemo(() => {

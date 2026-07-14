@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useAppDispatch, useAppSelector } from '../../../store';
 import { loginStart, loginSuccess, loginFailure } from '../state/authSlice';
-import { login as mockLogin } from '../services/mockAuthService';
+import { login } from '../services/authService';
 import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
 
 export default function LoginScreen() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const dispatch = useAppDispatch();
   const { isLoading, error, lockoutUntil } = useAppSelector(state => state.auth);
@@ -15,12 +15,11 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (isLockedOut) return;
-    if (!username || !password) return;
+    if (!email || !password) return;
 
     dispatch(loginStart());
-    // TODO: Replace mockLogin with a real apiService.post('/auth/login', ...) call
     try {
-      const response = await mockLogin(username, password);
+      const response = await login(email, password);
       if (response.success && response.data) {
         dispatch(loginSuccess(response.data));
       } else {
@@ -43,10 +42,11 @@ export default function LoginScreen() {
 
       <TextInput
         style={styles.input}
-        placeholder="Username"
-        value={username}
-        onChangeText={setUsername}
+        placeholder="Email"
+        value={email}
+        onChangeText={setEmail}
         autoCapitalize="none"
+        keyboardType="email-address"
         editable={!isLoading && !isLockedOut}
       />
 

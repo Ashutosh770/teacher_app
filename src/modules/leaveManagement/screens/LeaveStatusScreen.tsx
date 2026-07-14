@@ -51,7 +51,7 @@ export default function LeaveStatusScreen() {
   const requests = useAppSelector(s => s.leaveManagement.requests);
 
   useEffect(() => {
-    loadLeaveData();
+    void loadLeaveData();
   }, []);
 
   const filtered = useMemo(

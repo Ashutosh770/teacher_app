@@ -83,7 +83,7 @@ const FIXED_NOW = Date.parse('2024-05-01T09:00:00.000Z');
 
 const TEST_USER: User = {
   id: 'teacher-1',
-  username: 'teacher',
+  email: 'teacher@school.edu',
   name: 'Test Teacher',
   role: 'teacher',
   allowedModules: ['staffAttendance'],

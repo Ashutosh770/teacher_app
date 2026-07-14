@@ -86,7 +86,7 @@ export async function loadRoster(classId: string): Promise<void> {
   store.dispatch(setError(null));
 
   const response = await apiService.get<RosterStudent[]>(
-    `/roster/${encodeURIComponent(classId)}`,
+    `/student-attendance/roster/${encodeURIComponent(classId)}`,
   );
 
   if (response.success && response.data) {
@@ -100,38 +100,6 @@ export async function loadRoster(classId: string): Promise<void> {
   // surface the error so the UI can offer a retry (Req 9.4).
   store.dispatch(setError(response.error ?? 'Failed to load roster'));
   store.dispatch(setSessionState('roster_error'));
-}
-
-/**
- * Fixed demo roster matching the Figma mock, seeded via `loadMockRoster` so
- * the roster UI is visible without a real backend at `/roster/:classId`
- * (`loadRoster` above always fails against the placeholder API base URL).
- */
-const MOCK_ROSTER: RosterStudent[] = [
-  { id: 'mock-1', name: 'Aarav Kumar', rollNo: '01', enrollmentStatus: 'enrolled', attendanceStatus: 'present', statusSource: 'face_match', faceMatchConfidence: 96 },
-  { id: 'mock-2', name: 'Diya Patel', rollNo: '02', enrollmentStatus: 'enrolled', attendanceStatus: 'present', statusSource: 'face_match', faceMatchConfidence: 94 },
-  { id: 'mock-3', name: 'Arjun Singh', rollNo: '03', enrollmentStatus: 'enrolled', attendanceStatus: 'present', statusSource: 'face_match', faceMatchConfidence: 98 },
-  { id: 'mock-4', name: 'Ananya Sharma', rollNo: '04', enrollmentStatus: 'enrolled', attendanceStatus: 'pending', statusSource: null, faceMatchConfidence: null },
-  { id: 'mock-5', name: 'Vihaan Gupta', rollNo: '05', enrollmentStatus: 'enrolled', attendanceStatus: 'present', statusSource: 'face_match', faceMatchConfidence: 92 },
-  { id: 'mock-6', name: 'Aisha Khan', rollNo: '06', enrollmentStatus: 'not_enrolled', attendanceStatus: 'pending', statusSource: null, faceMatchConfidence: null },
-  { id: 'mock-7', name: 'Kabir Reddy', rollNo: '07', enrollmentStatus: 'enrolled', attendanceStatus: 'present', statusSource: 'face_match', faceMatchConfidence: 95 },
-  { id: 'mock-8', name: 'Saanvi Iyer', rollNo: '08', enrollmentStatus: 'enrolled', attendanceStatus: 'pending', statusSource: null, faceMatchConfidence: null },
-];
-
-/**
- * Seeds the fixed demo roster for `classId` directly into state, bypassing
- * `loadRoster`'s real API call. There is no backend yet — this exists purely
- * so the batch-scan roster UI can be exercised end-to-end (Req 9.1/9.2 demo
- * data), the same way `leaveManagementService`/`studentMarksService` seed
- * mock data for their screens. Safe to call every time the screen mounts;
- * it only writes when the roster is still empty so it never clobbers live
- * scan progress.
- */
-export function loadMockRoster(): void {
-  const state = store.getState().studentAttendance;
-  if (state.roster.length > 0) return;
-  store.dispatch(setRoster(sortRoster(MOCK_ROSTER)));
-  store.dispatch(setSessionState('roster_ready'));
 }
 
 /**
@@ -760,7 +728,7 @@ async function persistSubmission(): Promise<SubmitResult> {
   const records = buildSubmissionRecords(roster, classId, date);
   const payload = { classId, date, records };
 
-  const response = await apiService.post('/attendance/student', payload);
+  const response = await apiService.post('/student-attendance/submit', payload);
 
   if (response.success) {
     store.dispatch(setSubmitting(false));

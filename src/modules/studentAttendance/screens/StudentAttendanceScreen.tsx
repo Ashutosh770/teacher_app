@@ -24,7 +24,6 @@ import {
   cancelSubmit,
   confirmSubmit,
   countUnmarked,
-  loadMockRoster,
   loadRoster,
   markManually,
   resumeScanSession,
@@ -56,12 +55,10 @@ import {
  *  - the pending/failed offline-sync indicators (Req 15.3, 15.5).
  */
 /**
- * Demo class auto-selected when no class-selection UI has set one (Req 9.4
- * has no picker yet). Special-cased in the load effect below so this default
- * always seeds `loadMockRoster()` instead of the real `/roster/:classId`
- * fetch, which has no backend and would always fail.
+ * Class auto-selected when no class-selection UI has set one yet (Req 9.4
+ * has no picker yet).
  */
-const MOCK_CLASS_ID = 'X-A';
+const DEFAULT_CLASS_ID = 'X-A';
 
 /**
  * Wraps every session-state view in the shared navy gradient header. When
@@ -103,24 +100,17 @@ export default function StudentAttendanceScreen({ embedded = false }: StudentAtt
   const [addVisible, setAddVisible] = useState(false);
 
   // Load the roster on mount / when the selected class changes (Req 9.1, 9.4).
-  // No class-selection UI exists yet, so default to a demo class and seed its
-  // mock roster (the real `/roster/:classId` endpoint has no backend, so it
-  // always fails — MOCK_CLASS_ID is special-cased below so the auto-selected
-  // default never falls through to that real, always-failing fetch).
+  // No class-selection UI exists yet, so default to a fixed class.
   useEffect(() => {
     if (!selectedClassId) {
-      dispatch(setSelectedClass(MOCK_CLASS_ID));
-    } else if (selectedClassId === MOCK_CLASS_ID) {
-      loadMockRoster();
+      dispatch(setSelectedClass(DEFAULT_CLASS_ID));
     } else {
       void loadRoster(selectedClassId);
     }
   }, [selectedClassId, dispatch]);
 
   const handleRetry = useCallback(() => {
-    if (selectedClassId === MOCK_CLASS_ID) {
-      loadMockRoster();
-    } else if (selectedClassId) {
+    if (selectedClassId) {
       void loadRoster(selectedClassId);
     }
   }, [selectedClassId]);

@@ -1,12 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
-import { useAppSelector } from '../store';
+import { useAppDispatch, useAppSelector } from '../store';
 import { colors } from '../shared/theme';
 import { PermissionGate } from '../shared/components';
 import { useOfflineSyncProcessor } from '../modules/offlineSync';
+import { restoreSession } from '../modules/auth/services/authService';
+import { loginFailure, loginSuccess } from '../modules/auth/state/authSlice';
 
 // Module screens
 import HomeScreen from '../modules/home/screens/HomeScreen';
@@ -148,6 +151,7 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
+  const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector(state => state.auth.isAuthenticated);
   const user = useAppSelector(state => state.auth.user);
   const isAdmin = user?.role === 'admin';
@@ -157,6 +161,35 @@ export default function AppNavigator() {
   // poll while online so queued attendance clears its indicators within 5s of a
   // successful sync (Req 15.3/15.4).
   useOfflineSyncProcessor();
+
+  // Restore a session from a persisted access token on app boot, so a signed-in
+  // teacher isn't dropped back to the login screen every relaunch. Gated behind
+  // `isBootstrapping` so we never flash the Login screen while this resolves.
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const result = await restoreSession();
+      if (!active) return;
+      if (result?.success && result.data) {
+        dispatch(loginSuccess(result.data));
+      } else if (result && !result.success) {
+        dispatch(loginFailure(result.error ?? 'Session expired'));
+      }
+      setIsBootstrapping(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [dispatch]);
+
+  if (isBootstrapping) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator color={colors.primary} size="large" />
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer>

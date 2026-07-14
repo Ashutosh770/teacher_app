@@ -1,8 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing, typography } from '../../../shared/theme';
+import { loadDashboardStats } from '../services/adminDashboardService';
 
 export default function AdminDashboardScreen() {
+  useEffect(() => {
+    void loadDashboardStats();
+  }, []);
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Admin Dashboard</Text>

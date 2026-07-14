@@ -59,7 +59,7 @@ export default function ProfileScreen() {
             </LinearGradient>
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>{user?.name}</Text>
-              <Text style={styles.profileMeta}>@{user?.username}</Text>
+              <Text style={styles.profileMeta}>{user?.email}</Text>
               <StatusPill
                 label={user?.role === 'admin' ? 'Admin' : 'Teacher'}
                 tone={user?.role === 'admin' ? 'info' : 'success'}
