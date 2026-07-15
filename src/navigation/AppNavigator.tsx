@@ -169,14 +169,23 @@ export default function AppNavigator() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const result = await restoreSession();
-      if (!active) return;
-      if (result?.success && result.data) {
-        dispatch(loginSuccess(result.data));
-      } else if (result && !result.success) {
-        dispatch(loginFailure(result.error ?? 'Session expired'));
+      try {
+        const result = await restoreSession();
+        if (!active) return;
+        if (result?.success && result.data) {
+          dispatch(loginSuccess(result.data));
+        } else if (result && !result.success) {
+          dispatch(loginFailure(result.error ?? 'Session expired'));
+        }
+      } catch (err) {
+        // Never let a storage/network failure strand the app on the loading
+        // spinner — fall through to the login screen instead.
+        if (active) {
+          dispatch(loginFailure('Session expired'));
+        }
+      } finally {
+        if (active) setIsBootstrapping(false);
       }
-      setIsBootstrapping(false);
     })();
     return () => {
       active = false;

@@ -6,7 +6,7 @@ import { login } from '../services/authService';
 import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const dispatch = useAppDispatch();
   const { isLoading, error, lockoutUntil } = useAppSelector(state => state.auth);
@@ -15,11 +15,11 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (isLockedOut) return;
-    if (!email || !password) return;
+    if (!username || !password) return;
 
     dispatch(loginStart());
     try {
-      const response = await login(email, password);
+      const response = await login(username, password);
       if (response.success && response.data) {
         dispatch(loginSuccess(response.data));
       } else {
@@ -42,11 +42,11 @@ export default function LoginScreen() {
 
       <TextInput
         style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
+        placeholder="Username"
+        value={username}
+        onChangeText={setUsername}
         autoCapitalize="none"
-        keyboardType="email-address"
+        autoCorrect={false}
         editable={!isLoading && !isLockedOut}
       />
 

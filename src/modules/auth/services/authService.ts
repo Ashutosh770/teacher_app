@@ -2,8 +2,11 @@ import { apiService } from '../../../shared/services/api';
 import { secureStorage } from '../../../shared/services/storage';
 import type { ApiResponse, Session, User } from '../../../shared/types';
 
-const ACCESS_TOKEN_KEY = 'auth:accessToken';
-const REFRESH_TOKEN_KEY = 'auth:refreshToken';
+// expo-secure-store only permits alphanumeric characters plus ".", "-", and "_"
+// in keys — a ":" throws "Invalid key provided to SecureStore" on every
+// get/set/delete, which previously crashed session restore on boot.
+const ACCESS_TOKEN_KEY = 'auth.accessToken';
+const REFRESH_TOKEN_KEY = 'auth.refreshToken';
 
 /**
  * Every signed-in account gets both attendance modules by default — this
@@ -16,10 +19,13 @@ const REFRESH_TOKEN_KEY = 'auth:refreshToken';
 const DEFAULT_ALLOWED_MODULES = ['staffAttendance', 'studentAttendance'];
 
 interface BackendUser {
-  id: string;
+  id: number;
+  username: string;
   email: string;
-  name: string;
+  name: string | null;
   role: string;
+  roleCategory?: string;
+  roleID?: string;
 }
 
 interface LoginResponseData {
@@ -28,12 +34,22 @@ interface LoginResponseData {
   user: BackendUser;
 }
 
+/**
+ * KVS role codes -> app role. `KV` accounts are individual school users
+ * (teachers); the office/regional/zonal/HQ/admin codes are treated as admins
+ * (this only gates the Admin Dashboard tab client-side — the server still
+ * enforces role on sensitive endpoints). Adjust this set if the product
+ * requires a different split.
+ */
+const ADMIN_ROLE_CODES = ['AD', 'HQ', 'RO', 'ZT'];
+
 function toUser(backendUser: BackendUser): User {
   return {
-    id: backendUser.id,
+    id: String(backendUser.id),
+    username: backendUser.username,
     email: backendUser.email,
-    name: backendUser.name,
-    role: backendUser.role === 'admin' ? 'admin' : 'teacher',
+    name: backendUser.name ?? backendUser.username,
+    role: ADMIN_ROLE_CODES.includes(backendUser.role) ? 'admin' : 'teacher',
     allowedModules: DEFAULT_ALLOWED_MODULES,
   };
 }
@@ -82,10 +98,10 @@ export async function clearSession(): Promise<void> {
   await Promise.all([secureStorage.remove(ACCESS_TOKEN_KEY), secureStorage.remove(REFRESH_TOKEN_KEY)]);
 }
 
-export async function login(email: string, password: string): Promise<ApiResponse<Session>> {
-  const response = await apiService.post<LoginResponseData>('/auth/login', { email, password });
+export async function login(username: string, password: string): Promise<ApiResponse<Session>> {
+  const response = await apiService.post<LoginResponseData>('/auth/login', { username, password });
   if (!response.success || !response.data) {
-    return { success: false, error: response.error ?? 'Invalid email or password' };
+    return { success: false, error: response.error ?? 'Invalid username or password' };
   }
 
   const { accessToken, refreshToken, user } = response.data;
