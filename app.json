@@ -44,7 +44,8 @@
           "locationWhenInUsePermission": "This app uses your location to confirm you are on school premises when marking attendance."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "react-native-fast-tflite"
     ]
   }
 }

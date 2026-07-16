@@ -3,6 +3,7 @@ import { Provider } from 'react-redux';
 import { store } from './src/store';
 import AppNavigator from './src/navigation/AppNavigator';
 import { hydrateSyncQueue } from './src/modules/offlineSync';
+import { ErrorBoundary } from './src/shared/components';
 
 export default function App() {
   useEffect(() => {
@@ -12,8 +13,10 @@ export default function App() {
   }, []);
 
   return (
-    <Provider store={store}>
-      <AppNavigator />
-    </Provider>
+    <ErrorBoundary>
+      <Provider store={store}>
+        <AppNavigator />
+      </Provider>
+    </ErrorBoundary>
   );
 }

@@ -11,6 +11,7 @@ import announcementReducer from '../modules/announcement/state/announcementSlice
 import adminDashboardReducer from '../modules/adminDashboard/state/adminDashboardSlice';
 import offlineSyncReducer from '../modules/offlineSync/state/offlineSyncSlice';
 import { persistQueue } from '../modules/offlineSync/services/queuePersistence';
+import { reactotron } from '../shared/config/reactotron';
 
 export const store = configureStore({
   reducer: {
@@ -25,6 +26,11 @@ export const store = configureStore({
     adminDashboard: adminDashboardReducer,
     offlineSync: offlineSyncReducer,
   },
+  // Reactotron's store enhancer streams every dispatched action + resulting
+  // state diff to the desktop app; `reactotron` is null outside __DEV__ so
+  // this is a no-op in production builds.
+  enhancers: getDefaultEnhancers =>
+    reactotron ? getDefaultEnhancers().concat(reactotron.createEnhancer()) : getDefaultEnhancers(),
 });
 
 // Persist the offline sync queue on every mutation so it survives restarts

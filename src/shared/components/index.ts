@@ -5,3 +5,4 @@ export { default as GradientHeader, type GradientHeaderProps } from './GradientH
 export { default as StatusPill, type StatusPillProps, type StatusPillTone } from './StatusPill';
 export { default as ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { default as IconChip, type IconChipProps } from './IconChip';
+export { ErrorBoundary } from './ErrorBoundary';

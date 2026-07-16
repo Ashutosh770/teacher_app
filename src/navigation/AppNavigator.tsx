@@ -14,10 +14,6 @@ import { loginFailure, loginSuccess } from '../modules/auth/state/authSlice';
 // Module screens
 import HomeScreen from '../modules/home/screens/HomeScreen';
 import LoginScreen from '../modules/auth/screens/LoginScreen';
-import FaceEnrollmentScreen from '../modules/staffAttendance/screens/FaceEnrollmentScreen';
-import StudentAttendanceScreen from '../modules/studentAttendance/screens/StudentAttendanceScreen';
-import StudentFaceEnrollmentScreen from '../modules/studentAttendance/screens/StudentFaceEnrollmentScreen';
-import AttendanceTabScreen from '../modules/attendance/screens/AttendanceTabScreen';
 import LeaveManagementScreen from '../modules/leaveManagement/screens/LeaveManagementScreen';
 import LeaveStatusScreen from '../modules/leaveManagement/screens/LeaveStatusScreen';
 import TimeTableScreen from '../modules/timeTable/screens/TimeTableScreen';
@@ -47,26 +43,41 @@ const LeaveManagementStack = createNativeStackNavigator();
  * roster scanning under one shared header (Req 16.3 gating is enforced inside
  * that screen per-mode). Face enrollment stays a sibling route so the staff
  * face-step guard can redirect to it and return (Req 16.4).
+ *
+ * Both routes use `getComponent` rather than `component` so their modules
+ * (and the `react-native-vision-camera` import chain underneath them) are
+ * only `require()`d once the user actually navigates here — not at app boot.
+ * Loaded eagerly, that chain runs before the Login screen ever mounts and,
+ * on platforms/environments vision-camera doesn't support (web, or a native
+ * module not yet ready when the JS bundle first executes on device), that
+ * produces a blank screen with no catchable render error.
  */
 function StaffAttendanceNavigator() {
   return (
     <StaffAttendanceStack.Navigator screenOptions={{ headerShown: true }}>
       <StaffAttendanceStack.Screen
         name="StaffAttendanceHome"
-        component={AttendanceTabScreen}
+        getComponent={() => require('../modules/attendance/screens/AttendanceTabScreen').default}
         options={{ title: 'Attendance', headerShown: false }}
       />
       <StaffAttendanceStack.Screen
         name="FaceEnrollment"
-        component={FaceEnrollmentScreen}
+        getComponent={() => require('../modules/staffAttendance/screens/FaceEnrollmentScreen').default}
         options={{ title: 'Face Enrollment' }}
       />
     </StaffAttendanceStack.Navigator>
   );
 }
 
-/** Gates direct navigation to Student Attendance the same way staff attendance is gated (Req 16.3). */
+/**
+ * Gates direct navigation to Student Attendance the same way staff
+ * attendance is gated (Req 16.3). Requires the screen lazily (inside render,
+ * not at module top level) for the same boot-time reason as above — this
+ * wrapper is itself referenced via `component`, but nothing it imports at
+ * its own top level touches vision-camera.
+ */
 function GatedStudentAttendanceScreen() {
+  const StudentAttendanceScreen = require('../modules/studentAttendance/screens/StudentAttendanceScreen').default;
   return (
     <PermissionGate moduleKey={STUDENT_ATTENDANCE_MODULE_KEY} moduleLabel="Student Attendance">
       <StudentAttendanceScreen />
@@ -213,7 +224,9 @@ export default function AppNavigator() {
             )}
             <Stack.Screen
               name="StudentFaceEnrollment"
-              component={StudentFaceEnrollmentScreen}
+              getComponent={() =>
+                require('../modules/studentAttendance/screens/StudentFaceEnrollmentScreen').default
+              }
               options={{ headerShown: true, title: 'Student Face Enrollment' }}
             />
             <Stack.Screen name="StudentMarks" component={StudentMarksScreen} />

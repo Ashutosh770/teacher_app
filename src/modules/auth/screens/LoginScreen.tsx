@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '../../../store';
 import { loginStart, loginSuccess, loginFailure } from '../state/authSlice';
 import { login } from '../services/authService';
@@ -8,6 +9,7 @@ import { colors, spacing, typography, borderRadius } from '../../../shared/theme
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const dispatch = useAppDispatch();
   const { isLoading, error, lockoutUntil } = useAppSelector(state => state.auth);
 
@@ -50,14 +52,24 @@ export default function LoginScreen() {
         editable={!isLoading && !isLockedOut}
       />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        editable={!isLoading && !isLockedOut}
-      />
+      <View style={styles.passwordWrap}>
+        <TextInput
+          style={[styles.input, styles.passwordInput]}
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPassword}
+          editable={!isLoading && !isLockedOut}
+        />
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowPassword(v => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+        >
+          <Feather name={showPassword ? 'eye-off' : 'eye'} size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
 
       <TouchableOpacity
         style={[styles.button, (isLoading || isLockedOut) ? styles.buttonDisabled : undefined]}
@@ -101,6 +113,22 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
     fontSize: 16,
+    color: '#000000',
+  },
+  passwordWrap: {
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  passwordInput: {
+    paddingRight: spacing.xl + spacing.md,
+    marginBottom: 0,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: spacing.md,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
   button: {
     backgroundColor: colors.primary,

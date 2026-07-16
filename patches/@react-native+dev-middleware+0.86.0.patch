@@ -1,0 +1,40 @@
+diff --git a/node_modules/@react-native/dev-middleware/dist/createDevMiddleware.js b/node_modules/@react-native/dev-middleware/dist/createDevMiddleware.js
+index f995330..cdfa086 100644
+--- a/node_modules/@react-native/dev-middleware/dist/createDevMiddleware.js
++++ b/node_modules/@react-native/dev-middleware/dist/createDevMiddleware.js
+@@ -81,7 +81,15 @@ function getExperiments(config) {
+   return {
+     enableOpenDebuggerRedirect: config.enableOpenDebuggerRedirect ?? false,
+     enableNetworkInspector: config.enableNetworkInspector ?? false,
+-    enableStandaloneFuseboxShell: config.enableStandaloneFuseboxShell ?? true,
++    // Patched: unconditionally force the plain-browser fallback
++    // (launchDebuggerAppWindow, real installed Chrome/Edge) instead of the
++    // bundled Electron shell (launchDebuggerShell) — the latter's own strict
++    // argv parser rejects --disable-gpu, so it can't be fixed via launch
++    // flags, and it crashes outright on this machine's GPU/driver setup.
++    // Real Chrome has no such parser and honors --disable-gpu normally (see
++    // DefaultToolLauncher.js). Hardcoded rather than `config.x ?? false` —
++    // the caller passes `true` explicitly, so `??` never falls through.
++    enableStandaloneFuseboxShell: false,
+   };
+ }
+ function createWrappedEventReporter(reporter, logger, experiments) {
+diff --git a/node_modules/@react-native/dev-middleware/dist/utils/DefaultToolLauncher.js b/node_modules/@react-native/dev-middleware/dist/utils/DefaultToolLauncher.js
+index a34caf4..0e3eb20 100644
+--- a/node_modules/@react-native/dev-middleware/dist/utils/DefaultToolLauncher.js
++++ b/node_modules/@react-native/dev-middleware/dist/utils/DefaultToolLauncher.js
+@@ -27,7 +27,13 @@ const DefaultToolLauncher = {
+       await open(url);
+       return;
+     }
+-    const chromeFlags = [`--app=${url}`, "--window-size=1200,600"];
++    const chromeFlags = [
++      `--app=${url}`,
++      "--window-size=1200,600",
++      "--disable-gpu",
++      "--disable-software-rasterizer",
++      "--no-sandbox",
++    ];
+     return new Promise((resolve, reject) => {
+       const childProcess = spawn(chromePath, chromeFlags, {
+         detached: true,

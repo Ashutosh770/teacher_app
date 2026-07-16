@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
-import { GlassCard, ProgressBar } from '../../../shared/components';
+import { ProgressBar } from '../../../shared/components';
 import { useAppSelector } from '../../../store';
 import { STAFF_ATTENDANCE_MODULE_KEY, STUDENT_ATTENDANCE_MODULE_KEY } from '../../../navigation/AppNavigator';
 import { LEAVE_TYPES, loadLeaveData } from '../../leaveManagement/services/leaveManagementService';
@@ -110,7 +110,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <GlassCard variant="light" style={styles.statusCard}>
+          <View style={styles.statusCard}>
             <View style={styles.statusRow}>
               <View style={styles.statusText}>
                 <Text style={styles.statusLabel}>Today's Attendance</Text>
@@ -139,7 +139,7 @@ export default function HomeScreen() {
                 />
               </View>
             </View>
-          </GlassCard>
+          </View>
         </LinearGradient>
 
         <View style={styles.body}>
@@ -260,7 +260,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statusCard: {
-    padding: 0,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.xl,
   },
   statusRow: {
     flexDirection: 'row',
@@ -273,7 +274,7 @@ const styles = StyleSheet.create({
   },
   statusLabel: {
     ...typography.caption,
-    color: 'rgba(255,255,255,0.7)',
+    color: colors.textSecondary,
     marginBottom: spacing.xs,
   },
   statusValue: {
@@ -283,7 +284,7 @@ const styles = StyleSheet.create({
   },
   statusCaption: {
     ...typography.caption,
-    color: 'rgba(255,255,255,0.9)',
+    color: colors.textSecondary,
   },
   statusIconWrap: {
     width: 64,
@@ -304,16 +305,9 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     width: '47%',
-    backgroundColor: colors.glassSurface,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: colors.surface,
     borderRadius: borderRadius.xl,
     padding: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 3,
   },
   actionIconWrap: {
     width: 56,
