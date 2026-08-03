@@ -36,7 +36,21 @@ export const reactotron =
         const reactotronHost = process.env.EXPO_PUBLIC_REACTOTRON_HOST;
         return Reactotron.setAsyncStorageHandler(AsyncStorage)
           .configure({ name: 'Teacher App', ...(reactotronHost ? { host: reactotronHost } : {}) })
-          .useReactNative()
+          // `networking: false` is load-bearing, not a preference.
+          //
+          // The networking plugin monkey-patches XMLHttpRequest to log every
+          // request. It handles JSON bodies fine, but corrupts multipart
+          // FormData carrying a `file://` URI — the upload fails at the
+          // transport layer and surfaces to the app as a bare "Network error".
+          //
+          // That broke every photo upload (face enrollment and attendance
+          // verification) while leaving ordinary JSON calls working, which made
+          // it look like a server or tunnel problem: the same multipart request
+          // sent with curl from the same device succeeded.
+          //
+          // The Redux action/state timeline — the actually useful part — is
+          // unaffected and still enabled below.
+          .useReactNative({ networking: false })
           .use(reactotronRedux())
           .connect();
       })()

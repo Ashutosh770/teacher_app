@@ -1,369 +1,385 @@
 /**
- * Teacher face self-enrollment screen (Req 7.1–7.8).
+ * Face enrollment — one pose at a time.
  *
- * Lets a signed-in teacher enroll their own face so the staff face verification
- * step has reference data (the staff-flow guard hard-blocks that step until a
- * record exists — see `services/staffEnrollmentGuard`). The screen delegates the
- * capture → derive → persist pipeline to the shared `faceEnrollmentService` and
- * reflects its outcome:
+ * Replaces a timed five-shot burst that gave the user no chance to see what was
+ * captured. Each pose is now: read the instruction, take the shot when ready,
+ * look at it, keep it or retake it, upload just that one photo.
  *
- * - running          → "capturing"/"saving" progress (Req 7.2)
- * - saved            → success confirmation + mark `hasRecord` true (Req 7.5)
- * - error            → descriptive message + retry, existing record untouched (Req 7.6)
- * - permission block → open-settings guidance (blocked) or retry (denied) (Req 7.4)
+ * Why per-pose upload rather than one batch at the end:
+ *  - a bad frame is rejected by the server while the user is still in position,
+ *    instead of after all five have been taken;
+ *  - a failure costs one ~2.5 MB retry, not the whole ~12 MB session;
+ *  - each step is a single face inference, so nothing feels stalled.
  *
- * When a record already exists it offers a re-enrollment control with a
- * confirm-before-replace prompt (Req 7.7); the replace only takes effect on a
- * successful capture (the service preserves the prior record on failure — Req 7.6).
+ * The server stages poses and only promotes them on commit, so abandoning
+ * part-way leaves any existing enrollment exactly as it was.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Camera, useCameraDevice } from 'react-native-vision-camera';
+import { Camera, useCameraDevice, useCameraFormat } from 'react-native-vision-camera';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '../../../store';
-import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
-import {
-  faceEnrollmentService,
-  type EnrollmentResult,
-} from '../../../shared/services/faceEnrollment';
-import { faceCaptureService } from '../../../shared/services/faceCapture';
+import { borderRadius, colors, spacing, typography } from '../../../shared/theme';
+import { faceCaptureService, FACE_PHOTO_RESOLUTION } from '../../../shared/services/faceCapture';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
+import type { CapturedFrame } from '../../../shared/services/faceMatch/types';
+import {
+  capturePose,
+  uploadPose,
+  commitEnrollment,
+  ENROLLMENT_POSES,
+  MIN_POSES_TO_COMMIT,
+} from '../../../shared/services/incrementalEnrollment';
 import { setEnrollmentStatus, setHasEnrollmentRecord } from '../state/staffAttendanceSlice';
 
-/** UI-level feedback derived from the last enrollment attempt. */
-type Feedback =
-  | { kind: 'none' }
-  | { kind: 'success'; synced: boolean }
-  | { kind: 'error'; message: string }
-  | { kind: 'permission'; message: string; canRetry: boolean };
+type Phase =
+  | 'idle'
+  | 'ready' // camera live, waiting for the user to take this pose
+  | 'reviewing' // shot taken, awaiting keep-or-retake
+  | 'uploading'
+  | 'committing'
+  | 'done';
 
 export default function FaceEnrollmentScreen() {
   const dispatch = useAppDispatch();
-  const teacherId = useAppSelector((state) => state.auth.user?.id ?? null);
-  const { hasRecord, status } = useAppSelector((state) => state.staffAttendance.enrollment);
+  const insets = useSafeAreaInsets();
+  const teacherId = useAppSelector(state => state.auth.user?.id ?? null);
+  const hasRecord = useAppSelector(state => state.staffAttendance.enrollment.hasRecord);
 
-  const [feedback, setFeedback] = useState<Feedback>({ kind: 'none' });
-  const isRunning = status === 'capturing' || status === 'saving';
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [poseIndex, setPoseIndex] = useState(0);
+  const [preview, setPreview] = useState<CapturedFrame | null>(null);
+  const [stagedCount, setStagedCount] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
 
-  // Real camera preview + capture binding (Req 7.2). Without this,
-  // `faceEnrollmentService.enroll()` always fails with "Camera is not
-  // attached" since `captureFrame()` requires a mounted `<Camera>` ref.
-  const cameraRef = useRef<Camera>(null);
   const device = useCameraDevice('front');
-  useEffect(() => {
-    if (cameraRef.current) {
-      faceCaptureService.attachCamera(cameraRef.current);
-    }
-    return () => {
-      faceCaptureService.detachCamera();
-    };
-  }, [device]);
+  // Capped resolution: see FACE_PHOTO_RESOLUTION. Full-sensor JPEGs took 12-14s
+  // each to upload, which is where the intermittent "network unreachable"
+  // failures came from.
+  const format = useCameraFormat(device, [{ photoResolution: FACE_PHOTO_RESOLUTION }]);
 
-  // Reflect whether a record already exists on entry so the UI can offer
-  // re-enrollment (Req 7.7) vs first-time enrollment without waiting for an attempt.
-  useEffect(() => {
-    let active = true;
+  /**
+   * Attach via a callback ref, not an effect.
+   *
+   * An effect keyed on `device` only runs once, so any remount of the camera
+   * leaves the capture service holding a dead reference — and the next capture
+   * fails with "camera is unavailable" while the preview looks perfectly fine.
+   * A callback ref fires on every mount and unmount, so the two can never
+   * drift apart.
+   */
+  const setCameraRef = useCallback((instance: Camera | null) => {
+    if (instance) {
+      faceCaptureService.attachCamera(instance);
+    } else {
+      faceCaptureService.detachCamera();
+    }
+  }, []);
+
+  useEffect(() => () => faceCaptureService.detachCamera(), []);
+
+  const pose = ENROLLMENT_POSES[poseIndex];
+  const total = ENROLLMENT_POSES.length;
+  const isBusy = phase === 'uploading' || phase === 'committing';
+
+  const begin = useCallback(async () => {
+    const permission = await cameraPermissionManager.check();
+    const granted =
+      permission === 'granted' ? 'granted' : await cameraPermissionManager.request();
+    if (granted !== 'granted') {
+      setMessage('Camera permission is required to enroll your face.');
+      return;
+    }
+    setMessage(null);
+    setPoseIndex(0);
+    setStagedCount(0);
+    setPreview(null);
+    setPhase('ready');
+  }, []);
+
+  const onCapture = useCallback(async () => {
+    setMessage(null);
+    const result = await capturePose();
+    if (result.outcome === 'error') {
+      setMessage(
+        result.reason === 'capture_timeout'
+          ? 'The camera did not produce a usable photo. Try again.'
+          : 'The camera is unavailable. Try again.'
+      );
+      return;
+    }
+    setPreview(result.frame);
+    setPhase('reviewing');
+  }, []);
+
+  /** Discards the reviewed shot without uploading — nothing to undo server-side. */
+  const onRetake = useCallback(() => {
+    setPreview(null);
+    setMessage(null);
+    setPhase('ready');
+  }, []);
+
+  const onKeep = useCallback(async () => {
+    if (!teacherId || !preview) return;
+    setPhase('uploading');
+    const result = await uploadPose('staff', teacherId, poseIndex, preview);
+
+    if (result.outcome === 'no_face') {
+      // Specifically a bad frame, so send them back to retake THIS pose rather
+      // than reporting a generic failure they cannot act on.
+      setMessage(result.message);
+      setPreview(null);
+      setPhase('ready');
+      return;
+    }
+    if (result.outcome === 'error') {
+      setMessage(result.message);
+      setPhase('reviewing'); // keep the shot so a retry needs no re-capture
+      return;
+    }
+
+    // Clear any prior failure: leaving it on screen after a successful retry
+    // makes a working upload look like it failed again.
+    setMessage(null);
+    setStagedCount(result.stagedCount);
+    setPreview(null);
+    if (poseIndex + 1 < total) {
+      setPoseIndex(poseIndex + 1);
+      setPhase('ready');
+    } else {
+      setPhase('ready'); // all poses captured; the commit button takes over
+    }
+  }, [teacherId, preview, poseIndex, total]);
+
+  const onFinish = useCallback(async () => {
     if (!teacherId) return;
-    faceEnrollmentService.hasEnrollment('staff', teacherId).then((exists) => {
-      if (active) dispatch(setHasEnrollmentRecord(exists));
-    });
-    return () => {
-      active = false;
-    };
+    setPhase('committing');
+    dispatch(setEnrollmentStatus('saving'));
+    const result = await commitEnrollment('staff', teacherId);
+
+    if (result.outcome === 'error') {
+      setMessage(result.message);
+      dispatch(setEnrollmentStatus('error'));
+      setPhase('ready');
+      return;
+    }
+    dispatch(setHasEnrollmentRecord(true));
+    dispatch(setEnrollmentStatus('idle'));
+    setPhase('done');
   }, [teacherId, dispatch]);
 
-  const applyResult = useCallback(
-    (result: EnrollmentResult) => {
-      if (result.outcome === 'saved') {
-        dispatch(setHasEnrollmentRecord(true));
-        dispatch(setEnrollmentStatus('idle'));
-        setFeedback({ kind: 'success', synced: result.synced });
-        return;
-      }
-      if (result.outcome === 'cancelled') {
-        // No confirm gate is used for staff, but handle defensively.
-        dispatch(setEnrollmentStatus('idle'));
-        setFeedback({ kind: 'none' });
-        return;
-      }
-      // error — existing record is retained by the service (Req 7.6).
-      dispatch(setEnrollmentStatus('error'));
-      if (result.reason === 'camera_permission_required') {
-        const blocked = result.permissionState === 'blocked';
-        setFeedback({
-          kind: 'permission',
-          message: blocked
-            ? 'Camera access is blocked. Open device settings to allow the camera, then try again.'
-            : `${result.message} Please allow camera access to continue.`,
-          canRetry: !blocked,
-        });
-        return;
-      }
-      setFeedback({ kind: 'error', message: result.message });
-    },
-    [dispatch]
-  );
-
-  const runEnrollment = useCallback(async () => {
-    if (!teacherId || isRunning) return;
-    setFeedback({ kind: 'none' });
-    dispatch(setEnrollmentStatus('capturing'));
-    try {
-      const result = await faceEnrollmentService.enroll('staff', teacherId);
-      applyResult(result);
-    } catch {
-      // enroll() is documented never to throw, but guard so the UI never hangs.
-      dispatch(setEnrollmentStatus('error'));
-      setFeedback({ kind: 'error', message: 'Enrollment failed unexpectedly. Please try again.' });
-    }
-  }, [teacherId, isRunning, dispatch, applyResult]);
-
-  // Re-enrollment (Req 7.7): confirm before replacing the existing record.
   const confirmReEnroll = useCallback(() => {
-    if (isRunning) return;
     Alert.alert(
       'Replace enrolled face?',
-      'This will capture your face again and replace your existing enrollment. Your current enrollment stays in place unless the new capture succeeds.',
+      'Your current enrollment stays in place until the new one is completed.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Replace', style: 'destructive', onPress: runEnrollment },
+        { text: 'Re-enroll', style: 'destructive', onPress: () => void begin() },
       ]
     );
-  }, [isRunning, runEnrollment]);
-
-  const openSettings = useCallback(() => {
-    cameraPermissionManager.openSettings();
-  }, []);
+  }, [begin]);
 
   if (!teacherId) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.title}>Face Enrollment</Text>
+      <View style={[styles.screen, styles.centered]}>
         <Text style={styles.subtitle}>You must be signed in to enroll your face.</Text>
       </View>
     );
   }
 
+  const canFinish = stagedCount >= MIN_POSES_TO_COMMIT;
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + spacing.xl },
+      ]}
+    >
       <Text style={styles.title}>Face Enrollment</Text>
-      <Text style={styles.subtitle}>
-        Enroll your face so you can mark attendance with face verification.
-      </Text>
 
-      <View style={styles.cameraPanel}>
-        {device ? (
-          <Camera ref={cameraRef} style={StyleSheet.absoluteFill} device={device} isActive photo />
-        ) : (
-          <View style={styles.cameraFallback}>
-            <Feather name="camera" size={32} color={colors.disabled} />
-          </View>
-        )}
-      </View>
-
-      <View style={styles.statusCard}>
-        <Text style={styles.statusLabel}>Status</Text>
-        <Text style={[styles.statusValue, hasRecord ? styles.statusEnrolled : styles.statusPending]}>
-          {hasRecord ? 'Enrolled' : 'Not enrolled'}
-        </Text>
-      </View>
-
-      {isRunning && (
-        <View style={styles.progressRow}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.progressText}>
-            {status === 'saving' ? 'Saving your enrollment…' : 'Capturing your face…'}
-          </Text>
+      {phase === 'done' ? (
+        <View style={styles.doneCard}>
+          <Feather name="check-circle" size={40} color={colors.success} />
+          <Text style={styles.doneText}>Enrollment complete</Text>
+          <Text style={styles.subtitle}>{stagedCount} photos saved.</Text>
         </View>
-      )}
-
-      {feedback.kind === 'success' && (
-        <View style={[styles.banner, styles.bannerSuccess]}>
-          <Text style={styles.bannerText}>
-            {feedback.synced
-              ? 'Face enrolled successfully.'
-              : 'Face enrolled and saved. It will sync when you are back online.'}
-          </Text>
-        </View>
-      )}
-
-      {feedback.kind === 'error' && (
-        <View style={[styles.banner, styles.bannerError]}>
-          <Text style={styles.bannerText}>{feedback.message}</Text>
-        </View>
-      )}
-
-      {feedback.kind === 'permission' && (
-        <View style={[styles.banner, styles.bannerError]}>
-          <Text style={styles.bannerText}>{feedback.message}</Text>
-          {!feedback.canRetry && (
-            <TouchableOpacity style={styles.linkButton} onPress={openSettings}>
-              <Text style={styles.linkButtonText}>Open Settings</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {hasRecord ? (
-        <TouchableOpacity
-          style={[styles.button, isRunning && styles.buttonDisabled]}
-          onPress={confirmReEnroll}
-          disabled={isRunning}
-        >
-          <Text style={styles.buttonText}>Re-enroll face</Text>
-        </TouchableOpacity>
       ) : (
-        <TouchableOpacity
-          style={[styles.button, isRunning && styles.buttonDisabled]}
-          onPress={runEnrollment}
-          disabled={isRunning}
-        >
-          <Text style={styles.buttonText}>Start enrollment</Text>
-        </TouchableOpacity>
-      )}
+        <>
+          {/* Preview of the shot under review, otherwise the live camera. */}
+          {/* The camera stays MOUNTED for the whole session and the review shot
+              is overlaid on top of it. Swapping the two out unmounted the
+              camera between poses, which both dropped the capture reference and
+              forced a cold re-initialisation on every pose. */}
+          <View style={styles.frame}>
+            {device ? (
+              <Camera
+                ref={setCameraRef}
+                style={StyleSheet.absoluteFill}
+                device={device}
+                format={format}
+                photoQualityBalance="speed"
+                isActive={phase === 'ready' || phase === 'reviewing'}
+                photo
+              />
+            ) : (
+              <View style={[styles.centered, StyleSheet.absoluteFill]}>
+                <Feather name="camera-off" size={32} color={colors.disabled} />
+              </View>
+            )}
+            {phase === 'reviewing' && preview ? (
+              <Image source={{ uri: preview.uri }} style={StyleSheet.absoluteFill} />
+            ) : null}
+          </View>
 
-      {feedback.kind === 'error' || (feedback.kind === 'permission' && feedback.canRetry) ? (
-        <TouchableOpacity
-          style={[styles.buttonSecondary, isRunning && styles.buttonDisabled]}
-          onPress={runEnrollment}
-          disabled={isRunning}
-        >
-          <Text style={styles.buttonSecondaryText}>Retry</Text>
-        </TouchableOpacity>
-      ) : null}
+          {phase === 'idle' ? (
+            <>
+              <Text style={styles.subtitle}>
+                {hasRecord
+                  ? 'You are already enrolled. Re-enrolling replaces your existing photos.'
+                  : `You will take ${total} photos, one at a time. You can review and retake each one.`}
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={hasRecord ? confirmReEnroll : begin}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {hasRecord ? 'Re-enroll' : 'Start enrollment'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.stepLabel}>
+                Photo {Math.min(poseIndex + 1, total)} of {total} · {stagedCount} saved
+              </Text>
+              <Text style={styles.instruction}>{pose.instruction}</Text>
+
+              {message ? <Text style={styles.errorText}>{message}</Text> : null}
+
+              {phase === 'reviewing' ? (
+                <View style={styles.reviewRow}>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, isBusy && styles.disabled]}
+                    onPress={onRetake}
+                    disabled={isBusy}
+                  >
+                    <Text style={styles.secondaryButtonText}>Retake</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.primaryButton, styles.flex, isBusy && styles.disabled]}
+                    onPress={onKeep}
+                    disabled={isBusy}
+                  >
+                    <Text style={styles.primaryButtonText}>Use this photo</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.primaryButton, isBusy && styles.disabled]}
+                  onPress={onCapture}
+                  disabled={isBusy}
+                >
+                  <Text style={styles.primaryButtonText}>Take photo</Text>
+                </TouchableOpacity>
+              )}
+
+              {isBusy ? (
+                <View style={styles.busyRow}>
+                  <ActivityIndicator color={colors.primary} />
+                  <Text style={styles.busyText}>
+                    {phase === 'committing' ? 'Finishing enrollment…' : 'Uploading photo…'}
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Available as soon as the server would accept a commit, so a
+                  user who is happy after three good photos need not take five. */}
+              {canFinish && phase !== 'reviewing' ? (
+                <TouchableOpacity
+                  style={[styles.finishButton, isBusy && styles.disabled]}
+                  onPress={onFinish}
+                  disabled={isBusy}
+                >
+                  <Text style={styles.primaryButtonText}>
+                    Finish enrollment ({stagedCount} photos)
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          )}
+        </>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: spacing.lg,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    padding: spacing.lg,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
+  screen: { flex: 1, backgroundColor: colors.background },
+  content: { paddingHorizontal: spacing.lg },
+  centered: { alignItems: 'center', justifyContent: 'center' },
+  flex: { flex: 1 },
+  title: { ...typography.h2, color: colors.text, marginBottom: spacing.md },
   subtitle: {
     ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+    textAlign: 'center',
   },
-  cameraPanel: {
-    height: 240,
+  frame: {
+    height: 320,
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    backgroundColor: '#1A202C',
+    backgroundColor: colors.primaryDark,
     marginBottom: spacing.lg,
   },
-  cameraFallback: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+  stepLabel: { ...typography.caption, color: colors.textSecondary, textAlign: 'center' },
+  instruction: {
+    ...typography.h3,
+    color: colors.text,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    marginBottom: spacing.lg,
   },
-  statusCard: {
-    backgroundColor: colors.surface,
+  primaryButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  primaryButtonText: { color: colors.surface, fontSize: 16, fontWeight: '600' },
+  secondaryButton: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  statusLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  statusValue: {
-    ...typography.h3,
-  },
-  statusEnrolled: {
-    color: colors.success,
-  },
-  statusPending: {
-    color: colors.warning,
-  },
-  progressRow: {
-    flexDirection: 'row',
+    paddingVertical: 15,
+    paddingHorizontal: spacing.lg,
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginRight: spacing.md,
   },
-  progressText: {
-    ...typography.body,
-    color: colors.text,
-    marginLeft: spacing.sm,
-  },
-  banner: {
+  secondaryButtonText: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  reviewRow: { flexDirection: 'row', alignItems: 'center' },
+  finishButton: {
+    backgroundColor: colors.success,
     borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  bannerSuccess: {
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: colors.success,
-  },
-  bannerError: {
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: colors.error,
-  },
-  bannerText: {
-    ...typography.body,
-    color: colors.text,
-  },
-  button: {
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
+    paddingVertical: 15,
     alignItems: 'center',
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
   },
-  buttonDisabled: {
-    backgroundColor: colors.disabled,
-  },
-  buttonText: {
-    color: '#fff',
-    ...typography.body,
-    fontWeight: '600',
-  },
-  buttonSecondary: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  buttonSecondaryText: {
-    color: colors.primary,
-    ...typography.body,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: spacing.sm,
-  },
-  linkButtonText: {
-    ...typography.body,
-    color: colors.primary,
-    fontWeight: '600',
-  },
+  disabled: { opacity: 0.6 },
+  busyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: spacing.md },
+  busyText: { ...typography.body, color: colors.text, marginLeft: spacing.sm },
+  errorText: { ...typography.caption, color: colors.error, textAlign: 'center', marginBottom: spacing.sm },
+  doneCard: { alignItems: 'center', paddingVertical: spacing.xl },
+  doneText: { ...typography.h3, color: colors.text, marginTop: spacing.md, marginBottom: spacing.xs },
 });

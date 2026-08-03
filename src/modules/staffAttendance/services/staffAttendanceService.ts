@@ -166,7 +166,7 @@ export interface StaffAttendanceServiceDeps {
   capture: FaceCaptureService;
   matchProvider: FaceMatchProvider;
   enrollment: Pick<FaceEnrollmentService, 'getEnrollmentRecord' | 'hasEnrollment'>;
-  api: Pick<typeof apiService, 'get' | 'post'>;
+  api: Pick<typeof apiService, 'get' | 'post' | 'postForm'>;
   queue: typeof queueForSync;
   config: typeof attendanceConfig;
   /** Wall-clock source (ms since epoch); injectable for deterministic tests. */
@@ -187,6 +187,25 @@ export type StaffSubmitResult =
 // State machine
 // ---------------------------------------------------------------------------
 
+/**
+ * Narrows an unknown payload to a real attendance record.
+ *
+ * Guards against anything truthy-but-wrong being read as "already marked" —
+ * an API envelope, an error body, a partially-parsed response. A phantom
+ * record is uniquely nasty here: it blocks the user from marking attendance,
+ * and no amount of clearing data server-side removes it, because the server
+ * was never the source.
+ */
+function isAttendanceRecord(value: unknown): value is StaffAttendanceRecord {
+  if (value === null || typeof value !== 'object') return false;
+  const candidate = value as Partial<StaffAttendanceRecord>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.date === 'string' &&
+    typeof candidate.personId === 'string'
+  );
+}
+
 export class StaffAttendanceService {
   private readonly deps: StaffAttendanceServiceDeps;
 
@@ -195,6 +214,13 @@ export class StaffAttendanceService {
    * whether {@link submit} builds a geo-unverified record. Reset by {@link begin}.
    */
   private manualFallback = false;
+
+  /**
+   * The frame the server verified at the face step, held so submit can send it
+   * to `mark-with-face` — which re-verifies and records atomically, so the
+   * attendance row can never exist without a server-checked face behind it.
+   */
+  private lastVerifiedFrame: CapturedFrame | null = null;
 
   /**
    * Wall-clock time (ms) the current GPS acquisition phase began, spanning all
@@ -437,22 +463,86 @@ export class StaffAttendanceService {
 
     this.deps.dispatch(setFlowState('face_matching'));
 
-    let result: FaceMatchResult;
-    try {
-      result = await this.matchWithTimeout(frame, enrollment);
-    } catch {
-      // Provider timeout / unavailable → retry without incrementing (Req 5.9/17.2).
-      this.deps.dispatch(setError('Face verification is temporarily unavailable. Please retry.'));
+    // Server-authoritative verification. The client used to decide the match
+    // locally and post the verdict, which the backend cannot trust and now
+    // discards — `/staff-attendance/mark` forces faceMatchConfidence to null.
+    // Asking the server means the decision is made against the enrolled
+    // templates it holds, using the same model and threshold as every other
+    // check, rather than against whatever the device had cached.
+    const verification = await this.verifyFaceOnServer(user.id, frame);
+
+    if (verification.outcome === 'service_error') {
+      this.deps.dispatch(setError(verification.message));
       this.applyMatchOutcome('service_error');
       return;
     }
 
-    this.deps.dispatch(setLastConfidence(result.confidence));
-    if (result.confidence >= this.deps.config.face.staffThreshold) {
-      this.applyMatchOutcome('verified');
-    } else {
-      this.applyMatchOutcome('attempt_failed');
+    // Retained for submit: `mark-with-face` re-verifies server-side and records
+    // in one atomic step, so the photo has to survive the confirm screen.
+    this.lastVerifiedFrame = frame;
+    this.deps.dispatch(setLastConfidence(verification.confidence));
+    this.applyMatchOutcome(verification.outcome);
+  }
+
+  /**
+   * 1:1 verifies a captured frame against the signed-in user's enrolled
+   * templates, server-side.
+   *
+   * Distinguishes a genuine non-match (a failed attempt, which burns one of the
+   * user's tries) from the service being unreachable (retryable, which must not
+   * — otherwise a flaky network locks someone out of marking attendance).
+   */
+  private async verifyFaceOnServer(
+    userId: string,
+    frame: CapturedFrame
+  ): Promise<
+    | { outcome: 'verified' | 'attempt_failed'; confidence: number }
+    | { outcome: 'service_error'; message: string }
+  > {
+    const form = new FormData();
+    form.append('personId', userId);
+    form.append('personType', 'staff');
+    form.append('file', {
+      uri: frame.uri,
+      name: 'verify.jpg',
+      type: 'image/jpeg',
+    } as unknown as Blob);
+
+    let response: Awaited<ReturnType<typeof apiService.postForm>>;
+    try {
+      response = await this.deps.api.postForm<{ match: boolean; confidence: number | null }>(
+        '/faces/verify',
+        form
+      );
+    } catch {
+      return { outcome: 'service_error', message: 'Face verification is temporarily unavailable. Please retry.' };
     }
+
+    if (!response.success) {
+      // 422 means a face could not be found in the frame at all — that is a bad
+      // capture, so it costs an attempt rather than being retried for free.
+      if (response.status === 422) {
+        return { outcome: 'attempt_failed', confidence: 0 };
+      }
+      // In dev, show the underlying cause on screen. "Network error" alone is
+      // indistinguishable between the server being unreachable, a malformed
+      // request body, and a permission failure — which cost a lot of time to
+      // untangle by other means.
+      const detail = (response as { detail?: string }).detail;
+      return {
+        outcome: 'service_error',
+        message:
+          __DEV__ && detail
+            ? `${response.error ?? 'Request failed'} — ${detail}`
+            : (response.error ?? 'Face verification is temporarily unavailable. Please retry.'),
+      };
+    }
+
+    const data = response.data as { match: boolean; confidence: number | null } | undefined;
+    return {
+      outcome: data?.match ? 'verified' : 'attempt_failed',
+      confidence: data?.confidence ?? 0,
+    };
   }
 
   /**
@@ -557,7 +647,11 @@ export class StaffAttendanceService {
 
       let response: { success: boolean; error?: string };
       try {
-        response = await this.deps.api.post('/staff-attendance/mark', record);
+        response = this.manualFallback
+          ? // Manual fallback carries no photo by definition; the server records
+            // it with a null confidence and `markedManually` set.
+            await this.deps.api.post('/staff-attendance/mark', record)
+          : await this.submitWithFace(record);
       } catch {
         response = { success: false, error: 'Network error' };
       }
@@ -594,6 +688,64 @@ export class StaffAttendanceService {
    * Builds a {@link StaffAttendanceRecord} from the held verification state. For
    * the manual-fallback path the record is geo-unverified (Req 6.1).
    */
+  /**
+   * Submits the face path: uploads the verified photo to `mark-with-face`,
+   * which re-verifies 1:1 server-side and only then records, stamping its own
+   * computed confidence.
+   *
+   * Re-verifying at submit rather than trusting the face step is the point.
+   * `/staff-attendance/mark` deliberately nulls any client-supplied confidence,
+   * so a record created through it carries no evidence a face was ever checked.
+   * Going through this endpoint means an attendance row cannot exist without the
+   * server having matched the photo itself.
+   *
+   * A 422 here is the server declining the match. That is NOT queued for offline
+   * retry: replaying it would only be refused again, and treating a refusal as
+   * "pending sync" would show the user attendance that is never going to land.
+   */
+  private async submitWithFace(
+    record: StaffAttendanceRecord
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.lastVerifiedFrame) {
+      return { success: false, error: 'Face verification is missing. Please capture again.' };
+    }
+
+    // The RAW reading goes up, not this device's verdict on it. The server
+    // recomputes the distance and decides — `locationStatus` and
+    // `distanceMeters` are no longer sent at all, because a client able to
+    // assert "verified" could mark attendance from anywhere. The local
+    // evaluation remains, but only to guide the user before they submit.
+    const reading = this.deps.getState().staffAttendance.gps.reading;
+    if (!reading) {
+      return { success: false, error: 'Location reading is missing. Please try again.' };
+    }
+
+    const form = new FormData();
+    form.append('date', record.date);
+    form.append('status', record.status);
+    form.append('latitude', String(reading.latitude));
+    form.append('longitude', String(reading.longitude));
+    form.append('gpsAccuracy', String(reading.accuracy));
+    form.append('isMockLocation', reading.isMock ? 'true' : 'false');
+    form.append('capturedAt', new Date(reading.timestamp).toISOString());
+    form.append('file', {
+      uri: this.lastVerifiedFrame.uri,
+      name: 'attendance.jpg',
+      type: 'image/jpeg',
+    } as unknown as Blob);
+
+    const response = await this.deps.api.postForm('/staff-attendance/mark-with-face', form);
+    if (response.success) {
+      return { success: true };
+    }
+    // Only a transport failure (no status) is reported as 'Network error', which
+    // is what the caller uses to decide whether queueing for sync is sensible.
+    return {
+      success: false,
+      error: response.status === undefined ? 'Network error' : response.error,
+    };
+  }
+
   private buildRecord(): StaffAttendanceRecord {
     const state = this.deps.getState();
     const user = state.auth.user!;
@@ -651,27 +803,52 @@ export class StaffAttendanceService {
       const response = await this.deps.api.get<StaffAttendanceRecord | null>(
         `/staff-attendance/today?date=${encodeURIComponent(date)}`,
       );
-      if (response.success && response.data) {
+      if (response.success) {
+        // The server answered. Its answer wins — including when the answer is
+        // "no record". Previously an authoritative null fell through to the
+        // locally-held record, so a record deleted or corrected on the server
+        // could never clear on the device: the user was told "already marked"
+        // forever, with nothing on the server to back it up.
+        //
+        // The shape is checked rather than trusted for truthiness. An envelope
+        // or error body leaking through here is truthy but has no `id`/`date`,
+        // and treating it as a record showed attendance as already marked when
+        // nothing had been recorded at all — a phantom that no amount of
+        // clearing server-side could remove.
+        if (!isAttendanceRecord(response.data)) {
+          this.deps.dispatch(setTodayRecord(null));
+          return null;
+        }
         return response.data;
       }
     } catch {
-      // Offline: fall through to any locally held record.
+      // Fall through: unreachable server, not an authoritative "no record".
     }
 
+    // Only reached when the server could not be asked, so a locally-held record
+    // is the best available answer.
     return this.findTodayRecordInState();
   }
 
-  /** Finds a same-day record already present in slice state, if any. */
+  /**
+   * Finds a same-day record for the SIGNED-IN user already present in slice
+   * state, if any.
+   *
+   * The identity and date checks are load-bearing. These tablets are shared
+   * between teachers, so returning a record belonging to someone else — or to a
+   * previous day — would show one person another's attendance as their own and
+   * block them from marking their own.
+   */
   private findTodayRecordInState(): StaffAttendanceRecord | null {
     const state = this.deps.getState();
     const existing = state.staffAttendance.todayRecord;
-    if (!existing) return null;
+    if (!isAttendanceRecord(existing)) return null;
     const date = state.staffAttendance.selectedDate;
     const user = state.auth.user;
     if (user && existing.personId === user.id && (!date || existing.date === date)) {
       return existing;
     }
-    return existing;
+    return null;
   }
 
   /** Puts the flow into a terminal error state with a message. */

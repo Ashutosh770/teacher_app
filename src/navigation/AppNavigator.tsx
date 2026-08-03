@@ -14,6 +14,7 @@ import { loginFailure, loginSuccess } from '../modules/auth/state/authSlice';
 // Module screens
 import HomeScreen from '../modules/home/screens/HomeScreen';
 import LoginScreen from '../modules/auth/screens/LoginScreen';
+import RegistrationGate from '../modules/registration/screens/RegistrationGate';
 import LeaveManagementScreen from '../modules/leaveManagement/screens/LeaveManagementScreen';
 import LeaveStatusScreen from '../modules/leaveManagement/screens/LeaveStatusScreen';
 import TimeTableScreen from '../modules/timeTable/screens/TimeTableScreen';
@@ -216,7 +217,17 @@ export default function AppNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <>
-            <Stack.Screen name="Main" component={MainTabs} />
+            {/* Every authenticated session passes the registration gate first, so
+                an unregistered user is asked to consent at login rather than
+                discovering the requirement when they first try to mark
+                attendance and hit the server's enroll gate. */}
+            <Stack.Screen name="Main">
+              {() => (
+                <RegistrationGate>
+                  <MainTabs />
+                </RegistrationGate>
+              )}
+            </Stack.Screen>
             {/* Reached from Home's "Student Attendance" quick-action card — not a
                 bottom tab, matching the Figma design (Req: nav parity). */}
             {canStudentAttendance && (

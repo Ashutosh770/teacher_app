@@ -10,6 +10,7 @@ import classDiaryReducer from '../modules/classDiary/state/classDiarySlice';
 import announcementReducer from '../modules/announcement/state/announcementSlice';
 import adminDashboardReducer from '../modules/adminDashboard/state/adminDashboardSlice';
 import offlineSyncReducer from '../modules/offlineSync/state/offlineSyncSlice';
+import registrationReducer from '../modules/registration/state/registrationSlice';
 import { persistQueue } from '../modules/offlineSync/services/queuePersistence';
 import { reactotron } from '../shared/config/reactotron';
 
@@ -25,6 +26,7 @@ export const store = configureStore({
     announcement: announcementReducer,
     adminDashboard: adminDashboardReducer,
     offlineSync: offlineSyncReducer,
+    registration: registrationReducer,
   },
   // Reactotron's store enhancer streams every dispatched action + resulting
   // state diff to the desktop app; `reactotron` is null outside __DEV__ so

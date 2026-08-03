@@ -50,7 +50,7 @@ jest.mock('@react-native-async-storage/async-storage', () => {
     },
   };
 });
-jest.mock('./api', () => ({ apiService: { post: jest.fn() } }));
+jest.mock('./api', () => ({ apiService: { post: jest.fn(), postForm: jest.fn() } }));
 
 import type { FaceEnrollmentRecord } from '../types';
 import { apiService } from './api';
@@ -68,7 +68,9 @@ import {
   enrollmentStorageKey,
 } from './faceEnrollment';
 
-const postMock = apiService.post as jest.Mock;
+// Enrollment uploads the captured photos as multipart — the server computes the
+// authoritative embedding — so the contract under test is `postForm`, not `post`.
+const postMock = apiService.postForm as jest.Mock;
 
 const MIN_IMAGES = 3;
 
@@ -188,6 +190,38 @@ describe('FaceEnrollmentService.enroll', () => {
       expect.objectContaining({ personId: 'student-42', personType: 'student' })
     );
     expect(await service.hasEnrollment('student', 'student-42')).toBe(true);
+  });
+
+  it('uploads the captured photos as multipart, not a JSON record', async () => {
+    postMock.mockResolvedValue({ success: true, status: 201 });
+    const { service } = buildService();
+
+    await service.enroll('staff', 'teacher-1');
+
+    const [endpoint, body] = postMock.mock.calls[0];
+    expect(endpoint).toBe('/faces/enroll');
+    // The backend reads `files` from a multipart body and 400s without them —
+    // posting the locally-derived record as JSON silently never enrolled anyone.
+    expect(body).toBeInstanceOf(FormData);
+  });
+
+  it('does NOT queue a server rejection, and leaves any existing enrollment intact', async () => {
+    // A 4xx is the server refusing — missing consent, no face detected, bad
+    // request. Queueing these made a failed enrollment report success: the app
+    // cached an "enrolled" marker the server never agreed with, and the sync
+    // route rejects queued face enrollments outright, so it could never resolve.
+    postMock.mockResolvedValue({ success: false, error: 'Face enrollment requires recorded biometric consent for this person', status: 403 });
+    const { service, fakes } = buildService();
+
+    const result = await service.enroll('staff', 'teacher-1');
+
+    expect(result.outcome).toBe('error');
+    if (result.outcome === 'error') {
+      expect(result.reason).toBe('persist_failed');
+      expect(result.message).toContain('consent');
+    }
+    expect(fakes.queue).not.toHaveBeenCalled();
+    expect(await service.hasEnrollment('staff', 'teacher-1')).toBe(false);
   });
 
   it('returns a permission error without capturing or persisting (Req 7.4/8.7)', async () => {

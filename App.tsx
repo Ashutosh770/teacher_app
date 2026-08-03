@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Provider } from 'react-redux';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { store } from './src/store';
 import AppNavigator from './src/navigation/AppNavigator';
 import { hydrateSyncQueue } from './src/modules/offlineSync';
@@ -13,10 +14,17 @@ export default function App() {
   }, []);
 
   return (
+    // SafeAreaProvider must wrap the navigator for `useSafeAreaInsets` to report
+    // real values. Screens rendered with `headerShown: false` sit under the
+    // status bar and the bottom navigation/gesture bar otherwise — React
+    // Navigation's built-in compat provider only covers its own chrome, which
+    // these screens don't use.
     <ErrorBoundary>
-      <Provider store={store}>
-        <AppNavigator />
-      </Provider>
+      <SafeAreaProvider>
+        <Provider store={store}>
+          <AppNavigator />
+        </Provider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }

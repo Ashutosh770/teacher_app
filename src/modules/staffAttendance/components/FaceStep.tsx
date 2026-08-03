@@ -14,16 +14,31 @@
  *
  * Requirements: 5.2
  */
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { Camera, useCameraDevice } from 'react-native-vision-camera';
-import { useAppSelector } from '../../../store';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraFormat,
+  useFrameProcessor,
+} from 'react-native-vision-camera';
+import { useFaceDetector } from 'react-native-vision-camera-face-detector';
+import { Worklets } from 'react-native-worklets-core';
+import { useAppDispatch, useAppSelector } from '../../../store';
+import { setLiveness } from '../state/staffAttendanceSlice';
+import {
+  applyFrame,
+  isReadyToCapture,
+  INITIAL_LIVENESS,
+  type FaceFrameMetrics,
+  type LivenessState,
+} from '../../../shared/services/liveness';
 import { colors, spacing, typography, borderRadius, withAlpha } from '../../../shared/theme';
 import { attendanceConfig } from '../../../shared/config/attendanceConfig';
 import { staffAttendanceService } from '../services/staffAttendanceService';
-import { faceCaptureService } from '../../../shared/services/faceCapture';
+import { faceCaptureService, FACE_PHOTO_RESOLUTION } from '../../../shared/services/faceCapture';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
 import type { StaffFlowState } from '../state/staffAttendanceSlice';
 
@@ -74,6 +89,10 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
   // instead so the UI never crashes when no real camera exists.
   const cameraRef = useRef<Camera>(null);
   const device = useCameraDevice('front');
+  // Same capped resolution as enrollment: a verify photo is uploaded on every
+  // attempt, so full-sensor JPEGs cost seconds per try for detail the server
+  // discards when it crops the face to 112x112.
+  const format = useCameraFormat(device, [{ photoResolution: FACE_PHOTO_RESOLUTION }]);
   useEffect(() => {
     if (cameraRef.current) {
       faceCaptureService.attachCamera(cameraRef.current);
@@ -83,12 +102,90 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
     };
   }, [device]);
 
+  // -- Live liveness detection -------------------------------------------
+  //
+  // The frame processor runs on a separate native thread, so it cannot touch
+  // Redux directly. It extracts the metrics it needs and hands them to JS,
+  // where the (pure, tested) state machine folds them into the checklist.
+  // Deliberately minimal work inside the worklet: anything expensive there
+  // stalls the camera preview.
+  const dispatch = useAppDispatch();
+  const livenessRef = useRef<LivenessState>(INITIAL_LIVENESS);
+  const { detectFaces } = useFaceDetector({
+    // 'fast' over 'accurate': this drives a live checklist, not the identity
+    // decision — that is the server's job, from the captured still.
+    performanceMode: 'fast',
+    // Needed for eye-open probability, which is the entire basis of the blink.
+    classificationMode: 'all',
+    landmarkMode: 'none',
+    contourMode: 'none',
+  });
+
+  const onFrameMetrics = useMemo(
+    () =>
+      Worklets.createRunOnJS((metrics: FaceFrameMetrics | null) => {
+        const next = applyFrame(livenessRef.current, metrics);
+        const prev = livenessRef.current;
+        livenessRef.current = next;
+        // Only dispatch on a visible change — the processor fires many times a
+        // second and re-rendering the whole step on every frame would make the
+        // preview stutter for no benefit.
+        if (
+          prev.faceDetected !== next.faceDetected ||
+          prev.blinkDetected !== next.blinkDetected ||
+          prev.poseOk !== next.poseOk
+        ) {
+          dispatch(
+            setLiveness({
+              faceDetected: next.faceDetected,
+              blinkDetected: next.blinkDetected,
+              poseOk: next.poseOk,
+            })
+          );
+        }
+      }),
+    [dispatch]
+  );
+
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet';
+      const faces = detectFaces(frame);
+      const face = faces[0];
+      if (!face) {
+        onFrameMetrics(null);
+        return;
+      }
+      onFrameMetrics({
+        leftEyeOpenProbability: face.leftEyeOpenProbability ?? null,
+        rightEyeOpenProbability: face.rightEyeOpenProbability ?? null,
+        yawDegrees: face.yawAngle ?? 0,
+        pitchDegrees: face.pitchAngle ?? 0,
+      });
+    },
+    [detectFaces, onFrameMetrics]
+  );
+
+  // Each capture attempt starts from a clean slate, so a blink from a previous
+  // attempt cannot vouch for this one.
+  useEffect(() => {
+    if (flowState === 'face_capture') {
+      livenessRef.current = INITIAL_LIVENESS;
+      dispatch(setLiveness({ faceDetected: false, blinkDetected: false, poseOk: false }));
+    }
+  }, [flowState, dispatch]);
+
   const maxAttempts = attendanceConfig.face.maxStaffAttempts;
   const isMatching = flowState === 'face_matching';
   const isPending = CAPTURE_PENDING_STATES.has(flowState);
   const isConfirm = flowState === 'confirm';
   const isRetry =
     flowState === 'attempt_failed' || flowState === 'face_failed' || flowState === 'service_error';
+
+  // A retry bypasses the gate: if detection is misbehaving on a given device or
+  // in poor light, refusing to let someone even attempt a capture would strand
+  // them with no route to marking attendance at all.
+  const canCapture = isRetry || isReadyToCapture(liveness);
 
   const onCapture = useCallback(() => {
     if (isRetry) {
@@ -209,7 +306,16 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
           (device/dev-client dependent), otherwise the decorative fallback. */}
       <View style={styles.cameraPanel}>
         {device ? (
-          <Camera ref={cameraRef} style={StyleSheet.absoluteFill} device={device} isActive photo />
+          <Camera
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            device={device}
+            format={format}
+            photoQualityBalance="speed"
+            isActive
+            photo
+            frameProcessor={frameProcessor}
+          />
         ) : (
           <LinearGradient colors={['#2D3748', '#1A202C']} style={StyleSheet.absoluteFill} />
         )}
@@ -271,15 +377,33 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
       ) : null}
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
+      {/* Capture is gated on the checklist, which is what makes it a control
+          rather than decoration. Without the blink requirement a printed photo
+          passes the whole flow — it satisfies "face detected" and "pose OK"
+          perfectly well. The gate is lifted on a retry so a user cannot be
+          trapped by flaky detection with no way forward. */}
       <TouchableOpacity
-        style={[styles.primaryButton, isPending && styles.buttonDisabled]}
+        style={[
+          styles.primaryButton,
+          (isPending || !canCapture) && styles.buttonDisabled,
+        ]}
         onPress={onCapture}
-        disabled={isPending}
+        disabled={isPending || !canCapture}
       >
         <Text style={styles.primaryButtonText}>
           {isMatching ? 'Verifying…' : isRetry ? 'Try again' : 'Capture'}
         </Text>
       </TouchableOpacity>
+
+      {!canCapture && !isPending && !isRetry ? (
+        <Text style={styles.hintText}>
+          {!liveness.faceDetected
+            ? 'Position your whole face in the frame'
+            : !liveness.poseOk
+              ? 'Look straight at the camera'
+              : 'Blink once to confirm you are present'}
+        </Text>
+      ) : null}
 
     </View>
   );
@@ -425,6 +549,14 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.warning,
     marginBottom: spacing.sm,
+  },
+  // Tells the user which check is still outstanding. Without it a disabled
+  // Capture button reads as the app being broken rather than as waiting.
+  hintText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
   errorText: {
     ...typography.caption,

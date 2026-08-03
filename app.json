@@ -33,6 +33,15 @@
     },
     "plugins": [
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "//": "react-native-vision-camera-face-detector declares minSdk 26 (ML Kit), and the manifest merger refuses to build against the Expo default of 24. Raised rather than forced with tools:overrideLibrary, which would build but risk calling APIs that do not exist at runtime. minSdk 26 is Android 8.0 — the attendance tablets are institution-provisioned, so nothing in the fleet is below it.",
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      [
         "react-native-vision-camera",
         {
           "cameraPermissionText": "This app uses the camera to verify attendance with a face scan."

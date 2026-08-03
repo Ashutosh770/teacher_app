@@ -82,6 +82,34 @@ export type EnrollmentResult =
     };
 
 /** Options controlling a single enrollment run. */
+/** One step of the guided enrollment sequence. */
+export interface EnrollmentPose {
+  key: string;
+  instruction: string;
+}
+
+/**
+ * The capture sequence, in order.
+ *
+ * Each pose becomes its own stored template on the server, matched on whichever
+ * scores best — the same approach phone face-unlock uses. That is what makes
+ * varied angles help: under the previous averaged-centroid storage, a left-turn
+ * and a right-turn averaged into a reference resembling neither.
+ *
+ * Angles are deliberately MODEST — "slightly", not profiles. Attendance capture
+ * is someone standing square to a tablet, so a hard-profile template would never
+ * be the best match for any real query and would only add a way to match the
+ * wrong person. Two frontal captures bracket the sequence because that is the
+ * pose almost every verification will actually present.
+ */
+export const ENROLLMENT_POSES: EnrollmentPose[] = [
+  { key: 'centre', instruction: 'Look straight at the camera' },
+  { key: 'left', instruction: 'Turn your head slightly to the left' },
+  { key: 'right', instruction: 'Turn your head slightly to the right' },
+  { key: 'up', instruction: 'Tilt your chin up slightly' },
+  { key: 'centre-2', instruction: 'Look straight ahead once more' },
+];
+
 export interface EnrollOptions {
   /**
    * Optional identity-confirmation gate. Invoked after frames are captured and
@@ -92,6 +120,16 @@ export interface EnrollOptions {
    * self-enrollment flow omits it.
    */
   confirm?: (record: FaceEnrollmentRecord) => Promise<boolean> | boolean;
+  /**
+   * Called before each capture so the UI can prompt the user into the next pose
+   * and wait while they move. Capture happens when the returned promise
+   * resolves.
+   *
+   * Without it, frames are taken back-to-back in a tight loop — which is what
+   * this originally did, and it meant the "multiple photos" were several samples
+   * of a single instant, adding almost nothing over one capture.
+   */
+  onPose?: (pose: EnrollmentPose, index: number, total: number) => Promise<void> | void;
 }
 
 export interface FaceEnrollmentService {
@@ -151,7 +189,51 @@ export class DefaultFaceEnrollmentService implements FaceEnrollmentService {
     );
   }
 
+  /**
+   * Whether this person is enrolled — asking the SERVER first, falling back to
+   * the local marker only when it cannot be reached.
+   *
+   * The local cache alone is not trustworthy for this. It goes stale in both
+   * directions: someone enrolled on a different device (or before this cache
+   * existed) reads as un-enrolled and is sent round the enrollment loop forever,
+   * while an enrollment deleted server-side still reads as present. Both have
+   * happened here.
+   *
+   * The local answer is still the right fallback offline — the guard has to
+   * produce a decision without a network — so the server's answer is written
+   * back to the cache as it arrives, which also repairs a device that was wrong.
+   */
   async hasEnrollment(personType: PersonType, personId: string): Promise<boolean> {
+    const key = enrollmentStorageKey(personType, personId);
+    try {
+      const response = await apiService.get<{ personId: string; imageCount: number }>(
+        `/faces/${personType}/${personId}`,
+      );
+
+      if (response.success && response.data) {
+        const now = new Date().toISOString();
+        const existing = await appStorage.get<FaceEnrollmentRecord>(key);
+        await appStorage.set(key, {
+          personId,
+          personType,
+          embedding: [],
+          imageCount: response.data.imageCount ?? existing?.imageCount ?? 0,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        } satisfies FaceEnrollmentRecord);
+        return true;
+      }
+
+      // A 404 is the server stating there is no enrollment. Clear the local
+      // marker so the device stops disagreeing with it.
+      if (response.status === 404) {
+        await appStorage.remove(key);
+        return false;
+      }
+    } catch {
+      // Fall through to the cached answer.
+    }
+
     return (await this.getEnrollmentRecord(personType, personId)) !== null;
   }
 
@@ -179,7 +261,7 @@ export class DefaultFaceEnrollmentService implements FaceEnrollmentService {
     //    failure here leaves any existing record unchanged (Req 7.6/8.5/8.6).
     let frames: CapturedFrame[];
     try {
-      frames = await this.captureFrames();
+      frames = await this.captureFrames(options?.onPose);
     } catch (error) {
       return this.captureError(error);
     } finally {
@@ -235,14 +317,30 @@ export class DefaultFaceEnrollmentService implements FaceEnrollmentService {
     }
 
     // 6. Persist. Replace the existing record only on success (Req 7.5/7.6/8.6).
-    return this.persist(personType, personId, record);
+    //    The captured frames go with it: the server computes the authoritative
+    //    embedding from the images, so `derived` is only a local marker now.
+    return this.persist(personType, personId, record, frames);
   }
 
-  /** Captures `minEnrollmentImages` frames sequentially within the capture window. */
-  private async captureFrames(): Promise<CapturedFrame[]> {
+  /**
+   * Captures one frame per pose in the guided sequence.
+   *
+   * When `onPose` is supplied the UI prompts for each pose and this waits for
+   * the user to get there, so the frames are genuinely different views. Without
+   * it the frames are taken back-to-back, which yields near-identical captures —
+   * retained only so callers that do not drive a guided UI keep working.
+   */
+  private async captureFrames(
+    onPose?: EnrollOptions['onPose']
+  ): Promise<CapturedFrame[]> {
     await this.deps.capture.startPreview();
+    const total = this.deps.minEnrollmentImages;
     const frames: CapturedFrame[] = [];
-    for (let i = 0; i < this.deps.minEnrollmentImages; i += 1) {
+    for (let i = 0; i < total; i += 1) {
+      // Cycle if configured for more frames than there are defined poses, so the
+      // sequence degrades to repeats rather than reading past the end.
+      const pose = ENROLLMENT_POSES[i % ENROLLMENT_POSES.length];
+      await onPose?.(pose, i, total);
       frames.push(await this.deps.capture.captureFrame());
     }
     return frames;
@@ -272,25 +370,52 @@ export class DefaultFaceEnrollmentService implements FaceEnrollmentService {
   }
 
   /**
-   * Persists the derived record to the backend and local cache. On any network
-   * or backend failure the record is queued for offline sync and still cached
-   * locally, so the enrollment is treated as saved (Req 7.8/8.8). The local
-   * cache is written only on the save path, so a failure before this point
-   * leaves any existing record unchanged.
+   * Uploads the captured photos to the backend, which computes and stores the
+   * authoritative embedding, then caches a local marker.
+   *
+   * Sends multipart, not the derived record. Enrollment is server-authoritative:
+   * the 512-D embedding lives in the face service's vector store, and the
+   * on-device `derived` value is now only a local "this person is enrolled"
+   * marker. Posting the record as JSON — as this did previously — is rejected by
+   * the backend, which reads `files` from a multipart body and 400s without them.
+   *
+   * Failure handling distinguishes two cases that must not be conflated:
+   *
+   *  - **Transport failure** (offline, server unreachable) — genuinely retryable,
+   *    so the enrollment is queued and reported as saved-pending (Req 7.8/8.8).
+   *  - **Server rejection** (4xx — no consent, no face detected, bad request) —
+   *    NOT retryable. Queueing these was the bug that made a failed enrollment
+   *    look successful: the app reported "saved", cached a marker the server
+   *    never agreed with, and the offline-sync route rejects queued face
+   *    enrollments outright, so the item could never be delivered. The user
+   *    believed they were enrolled and no amount of waiting would make it true.
    */
   private async persist(
     personType: PersonType,
     personId: string,
-    record: FaceEnrollmentRecord
+    record: FaceEnrollmentRecord,
+    frames: CapturedFrame[]
   ): Promise<EnrollmentResult> {
     const key = enrollmentStorageKey(personType, personId);
 
-    let response: { success: boolean; error?: string };
+    const form = new FormData();
+    form.append('personId', personId);
+    form.append('personType', personType);
+    frames.forEach((frame, index) => {
+      // React Native's FormData takes a {uri, name, type} part for file uploads;
+      // vision-camera gives us a `file://` uri, which it streams directly rather
+      // than loading the image into JS memory.
+      form.append('files', {
+        uri: frame.uri,
+        name: `enroll-${index}.jpg`,
+        type: 'image/jpeg',
+      } as unknown as Blob);
+    });
+
+    let response: { success: boolean; error?: string; status?: number };
     try {
-      response = await apiService.post('/faces/enroll', record);
+      response = await apiService.postForm('/faces/enroll', form);
     } catch {
-      // apiService normalizes errors, but guard against unexpected throws so the
-      // enrollment is never silently lost.
       response = { success: false, error: 'Network error' };
     }
 
@@ -299,9 +424,16 @@ export class DefaultFaceEnrollmentService implements FaceEnrollmentService {
       return { outcome: 'saved', record, synced: true };
     }
 
-    // Offline / backend unavailable: queue for sync and treat as saved locally
-    // (Req 7.8/8.8). The offline-sync queue retries delivery when connectivity
-    // returns.
+    const isTransport = response.status === undefined;
+    if (!isTransport) {
+      // Leave any existing enrollment untouched and surface the server's reason.
+      return {
+        outcome: 'error',
+        reason: 'persist_failed',
+        message: response.error ?? 'Enrollment was rejected. Please try again.',
+      };
+    }
+
     this.deps.queue('faceEnrollment', 'enroll', record);
     await appStorage.set(key, record);
     return { outcome: 'saved', record, synced: false };

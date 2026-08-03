@@ -34,6 +34,21 @@ import type { CapturedFrame } from './faceMatch/types';
  */
 export type { CapturedFrame };
 
+/**
+ * Capture resolution requested for face photos.
+ *
+ * Full sensor resolution produces ~2.2 MB JPEGs, which took 12-14 seconds each
+ * to upload over Wi-Fi in testing — long enough for a transient drop or Wi-Fi
+ * power-saving to kill the connection mid-transfer, surfacing as an unhelpful
+ * "network unreachable".
+ *
+ * 720p is far more than the recognition needs: the server aligns and crops each
+ * face to 112x112 before embedding it, so a full-resolution capture is
+ * discarded detail that costs upload time and reliability. The face still
+ * occupies a large fraction of the frame at this size.
+ */
+export const FACE_PHOTO_RESOLUTION = { width: 1280, height: 720 } as const;
+
 // ---------------------------------------------------------------------------
 // Typed errors
 // ---------------------------------------------------------------------------

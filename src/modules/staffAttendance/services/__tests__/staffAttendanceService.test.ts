@@ -70,7 +70,10 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 import { configureStore } from '@reduxjs/toolkit';
 import type { RootState, AppDispatch } from '../../../../store';
 import authReducer, { loginSuccess } from '../../../auth/state/authSlice';
-import staffAttendanceReducer from '../../state/staffAttendanceSlice';
+import staffAttendanceReducer, {
+  setGpsReading,
+  setTodayRecord,
+} from '../../state/staffAttendanceSlice';
 import { attendanceConfig } from '../../../../shared/config/attendanceConfig';
 import { TimeoutError, type GeoFenceResult, type GPSReading } from '../../../../shared/services/geoFence';
 import type { PermissionManager, PermissionState } from '../../../../shared/services/permissions';
@@ -134,7 +137,7 @@ interface Fakes {
     hasEnrollment: jest.Mock<Promise<boolean>, unknown[]>;
     getEnrollmentRecord: jest.Mock<Promise<FaceEnrollmentRecord | null>, unknown[]>;
   };
-  api: { get: jest.Mock; post: jest.Mock };
+  api: { get: jest.Mock; post: jest.Mock; postForm: jest.Mock };
   queue: jest.Mock;
   loadSchoolLocation: jest.Mock<Promise<SchoolLocation | null>, []>;
 }
@@ -180,6 +183,14 @@ function buildHarness(options?: { signedIn?: boolean }) {
     api: {
       get: jest.fn(async () => ({ success: true, data: null })),
       post: jest.fn(async () => ({ success: true })),
+      // Face verification and marking are both server-side now, and both go
+      // through multipart. Dispatching on the endpoint lets a test override one
+      // without having to restate the other.
+      postForm: jest.fn(async (endpoint: string) =>
+        endpoint === '/faces/verify'
+          ? { success: true, status: 200, data: { match: true, confidence: 95 } }
+          : { success: true, status: 201 }
+      ),
     },
     queue: jest.fn(),
     loadSchoolLocation: jest.fn(async () => SCHOOL),
@@ -307,9 +318,12 @@ describe('geo-fence evaluation branches (Req 2.5/2.6/3.1)', () => {
 describe('face verification branches (Req 5.4/5.6)', () => {
   it('a confidence at/above the staff threshold transitions to confirm (Req 5.4)', async () => {
     const { service, fakes, flowState, faceAttempts } = buildHarness();
-    fakes.matchProvider.matchOne.mockResolvedValue({
-      confidence: attendanceConfig.face.staffThreshold,
-      personId: 'teacher-1',
+    // The SERVER decides the match now — the client no longer scores the face
+    // locally, so the verdict under test is the response, not a provider result.
+    fakes.api.postForm.mockResolvedValue({
+      success: true,
+      status: 200,
+      data: { match: true, confidence: attendanceConfig.face.staffThreshold },
     });
 
     await service.startFaceStep();
@@ -321,7 +335,11 @@ describe('face verification branches (Req 5.4/5.6)', () => {
 
   it('below-threshold matches increment attempts until the cap flips to face_failed (Req 5.6)', async () => {
     const { service, fakes, flowState, faceAttempts } = buildHarness();
-    fakes.matchProvider.matchOne.mockResolvedValue({ confidence: 40, personId: null });
+    fakes.api.postForm.mockResolvedValue({
+      success: true,
+      status: 200,
+      data: { match: false, confidence: 40 },
+    });
 
     await service.startFaceStep();
 
@@ -345,10 +363,32 @@ describe('face verification branches (Req 5.4/5.6)', () => {
 // Phase 3: submission
 // --------------------------------------------------------------------------
 
+/** A plausible on-site fix, for tests that skip the GPS acquisition phase. */
+function seedGpsReading(store: { dispatch: (action: unknown) => unknown }): void {
+  store.dispatch(
+    setGpsReading({
+      latitude: 28.5408328,
+      longitude: 77.1836603,
+      accuracy: 8,
+      isMock: false,
+      mockDetectionSupported: true,
+      timestamp: Date.now(),
+    })
+  );
+}
+
 describe('submission branches (Req 6.3/6.5)', () => {
   it('queues the record and transitions to pending_sync on a network failure (Req 6.5)', async () => {
     const { service, fakes, flowState, store } = buildHarness();
-    fakes.api.post.mockResolvedValue({ success: false, error: 'Network error' });
+    // Go through the face step first: the submit path uploads the frame the
+    // server verified, so a record cannot be built without one.
+    // The submit path uploads the RAW reading for the server to validate, so a
+    // reading must be in state — the client's own verdict is no longer sent.
+    seedGpsReading(store);
+    await service.startFaceStep();
+    await service.captureAndMatch();
+    // No `status` = transport failure, which is the only case worth queueing.
+    fakes.api.postForm.mockResolvedValue({ success: false, error: 'Network error' });
 
     const result = await service.submit();
 
@@ -363,13 +403,28 @@ describe('submission branches (Req 6.3/6.5)', () => {
   });
 
   it('online success transitions to success and marks the record synced', async () => {
-    const { service, fakes, flowState } = buildHarness();
-    fakes.api.post.mockResolvedValue({ success: true });
+    const { service, fakes, flowState, store } = buildHarness();
 
+    // The submit path uploads the RAW reading for the server to validate, so a
+    // reading must be in state — the client's own verdict is no longer sent.
+    seedGpsReading(store);
+    await service.startFaceStep();
+    await service.captureAndMatch();
     const result = await service.submit();
 
     expect(result.outcome).toBe('success');
     expect(flowState()).toBe('success');
+    // Recorded through the server-verifying endpoint, never the bare `/mark`
+    // route — which discards any client-supplied confidence, so a record
+    // created there carries no evidence a face was checked at all.
+    expect(fakes.api.postForm).toHaveBeenCalledWith(
+      '/staff-attendance/mark-with-face',
+      expect.any(Object)
+    );
+    expect(fakes.api.post).not.toHaveBeenCalledWith(
+      '/staff-attendance/mark',
+      expect.anything()
+    );
   });
 
   it('begin() surfaces an existing record for today as already_marked (Req 6.3)', async () => {
@@ -395,6 +450,64 @@ describe('submission branches (Req 6.3/6.5)', () => {
     expect(store.getState().staffAttendance.todayRecord).toEqual(existing);
     // The duplicate-day guard must short-circuit before requesting location.
     expect(fakes.locationPermission.check).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale local record when the server says none exists', async () => {
+    // The server's answer is authoritative in BOTH directions. An answered
+    // "no record" used to fall through to the locally-held one, so a record
+    // deleted or corrected server-side could never clear on the device — the
+    // user was stuck on "already marked" with nothing backing it.
+    const { service, fakes, flowState, store } = buildHarness();
+    store.dispatch(
+      setTodayRecord({
+        id: 'staff-teacher-1-stale',
+        date: store.getState().staffAttendance.selectedDate,
+        personId: 'teacher-1',
+        personName: 'Test Teacher',
+        status: 'present',
+        markedAt: '2024-05-01T08:00:00.000Z',
+        locationStatus: 'verified',
+        distanceMeters: 12,
+        faceMatchConfidence: 91,
+        markedManually: false,
+        syncState: 'synced',
+      })
+    );
+    fakes.api.get.mockResolvedValue({ success: true, data: null });
+
+    await service.begin();
+
+    expect(store.getState().staffAttendance.todayRecord).toBeNull();
+    expect(flowState()).not.toBe('already_marked');
+  });
+
+  it('ignores a locally-held record belonging to a different user', async () => {
+    // These tablets are shared between teachers. Returning another person's
+    // record would show one teacher someone else's attendance as their own and
+    // block them from marking it.
+    const { service, fakes, flowState, store } = buildHarness();
+    store.dispatch(
+      setTodayRecord({
+        id: 'staff-someone-else',
+        date: store.getState().staffAttendance.selectedDate,
+        personId: 'teacher-99',
+        personName: 'Another Teacher',
+        status: 'present',
+        markedAt: '2024-05-01T08:00:00.000Z',
+        locationStatus: 'verified',
+        distanceMeters: 12,
+        faceMatchConfidence: 91,
+        markedManually: false,
+        syncState: 'synced',
+      })
+    );
+    // Server unreachable, so the local record is the only candidate — and it
+    // must still be rejected on identity.
+    fakes.api.get.mockResolvedValue({ success: false, error: 'Network error' });
+
+    await service.begin();
+
+    expect(flowState()).not.toBe('already_marked');
   });
 
   it('submit() short-circuits to already_marked when a record is already held in state (Req 6.3)', async () => {

@@ -23,12 +23,16 @@ export const attendanceConfig = {
     captureWindowMs: 10000, // Req 5.3/5.8 — face capture window
     matchTimeoutMs: 5000, // Req 5.3/5.9/10.8 — provider match timeout
     maxStaffAttempts: 3, // Req 5.5/5.6 — staff face attempt cap
-    minEnrollmentImages: 3, // Req 7/8 — minimum enrollment frames
+    // One frame per pose in ENROLLMENT_POSES. Each becomes its own stored
+    // template, matched on whichever scores best, so more distinct poses widen
+    // the range of angles that verify cleanly. Capped at 5 because the backend's
+    // enroll route accepts at most 5 files.
+    minEnrollmentImages: 5, // Req 7/8 — one capture per guided pose
     scanFramesPerSecond: 2, // Req 10.2 — student scan frame rate
     consecutiveTimeoutLimit: 3, // Req 10.8/17.4 — pause after N timeouts
     unresolvedCap: 50, // Req 10.4 — unresolved detections FIFO cap
   },
-  faceMatchMode: 'real' as 'real' | 'mock',
+  faceMatchMode: 'mock' as 'real' | 'mock',
   offline: {
     maxQueuedRecords: 500, // Req 15.1 — minimum offline queue capacity
     maxSyncAttempts: 5, // Req 15.2 — sync retries before marking failed
