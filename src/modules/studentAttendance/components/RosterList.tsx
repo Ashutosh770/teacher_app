@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
 import { StatusPill } from '../../../shared/components';
@@ -18,6 +18,24 @@ export interface RosterListProps {
    * marking, so this is left unimplemented here.
    */
   renderStatusControl?: (student: RosterStudent) => React.ReactNode;
+  /**
+   * Opens face enrollment for one student. Optional so the list stays usable
+   * (and testable) without a navigator; when omitted the face status renders as
+   * a plain, non-interactive label exactly as before.
+   */
+  onEnrollPress?: (student: RosterStudent) => void;
+  /**
+   * Content scrolled ABOVE the first row (stats, scan button) and BELOW the
+   * last (tips).
+   *
+   * The screen's chrome used to sit outside the list as fixed siblings, which
+   * left the list roughly one row tall on a phone: everything else claimed its
+   * height first and the list got whatever remained. Passing it through the
+   * list means only the rows compete for vertical space, and the chrome scrolls
+   * out of the way as the teacher works down the roster.
+   */
+  ListHeaderComponent?: React.ComponentProps<typeof FlatList>['ListHeaderComponent'];
+  ListFooterComponent?: React.ComponentProps<typeof FlatList>['ListFooterComponent'];
 }
 
 /**
@@ -31,29 +49,47 @@ export interface RosterListProps {
  * The manual marking controls are intentionally NOT wired here; they are added
  * in task 14.2 via the optional `renderStatusControl` seam.
  */
-export default function RosterList({ roster, renderStatusControl }: RosterListProps) {
+export default function RosterList({
+  roster,
+  renderStatusControl,
+  onEnrollPress,
+  ListHeaderComponent,
+  ListFooterComponent,
+}: RosterListProps) {
   const renderItem = useCallback(
     ({ item }: { item: RosterStudent }) => (
-      <RosterRow student={item} renderStatusControl={renderStatusControl} />
+      <RosterRow
+        student={item}
+        renderStatusControl={renderStatusControl}
+        onEnrollPress={onEnrollPress}
+      />
     ),
-    [renderStatusControl],
+    [renderStatusControl, onEnrollPress],
   );
-
-  if (roster.length === 0) {
-    return (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>No students in this roster yet.</Text>
-      </View>
-    );
-  }
 
   return (
     <FlatList
+      // `flex: 1` is load-bearing, not cosmetic. Without a style a FlatList
+      // sizes to its CONTENT rather than to its parent, so once the roster grew
+      // past what fitted on screen the list rendered straight over the Submit
+      // button and the tip below it instead of scrolling inside its own area.
+      style={styles.list}
       data={roster}
       keyExtractor={item => item.id}
       renderItem={renderItem}
       contentContainerStyle={styles.listContent}
       ItemSeparatorComponent={Separator}
+      showsVerticalScrollIndicator
+      ListHeaderComponent={ListHeaderComponent}
+      ListFooterComponent={ListFooterComponent}
+      // Rendered through the list rather than returned early, so an empty
+      // roster still shows the stats and the scan button above it instead of a
+      // bare sentence on an otherwise blank screen.
+      ListEmptyComponent={
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>No students in this roster yet.</Text>
+        </View>
+      }
     />
   );
 }
@@ -65,9 +101,11 @@ function Separator() {
 function RosterRow({
   student,
   renderStatusControl,
+  onEnrollPress,
 }: {
   student: RosterStudent;
   renderStatusControl?: (student: RosterStudent) => React.ReactNode;
+  onEnrollPress?: (student: RosterStudent) => void;
 }) {
   const isPresent = student.attendanceStatus === 'present';
   return (
@@ -80,7 +118,28 @@ function RosterRow({
           {student.name}
         </Text>
         <View style={styles.metaRow}>
-          <RosterFaceStatus student={student} />
+          {onEnrollPress ? (
+            // The face status doubles as the way in to enrollment: it is the
+            // part of the row that states the problem ("No Face Data"), so it
+            // is where a teacher looks when they want to fix it.
+            <TouchableOpacity
+              style={styles.faceStatusRow}
+              onPress={() => onEnrollPress(student)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                student.enrollmentStatus === 'enrolled'
+                  ? `Re-enroll ${student.name}'s face`
+                  : `Enroll ${student.name}'s face`
+              }
+            >
+              <RosterFaceStatus student={student} />
+              {student.enrollmentStatus !== 'enrolled' && (
+                <Text style={styles.enrollLink}>Enroll</Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <RosterFaceStatus student={student} />
+          )}
         </View>
       </View>
       <View style={styles.rowTrailing}>
@@ -144,8 +203,11 @@ function badgeStyleFor(status: RosterAttendanceStatus) {
 }
 
 const styles = StyleSheet.create({
+  list: {
+    flex: 1,
+  },
   listContent: {
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.md,
   },
   row: {
     flexDirection: 'row',
@@ -203,6 +265,11 @@ const styles = StyleSheet.create({
   confidenceText: {
     ...typography.small,
     color: colors.textSecondary,
+  },
+  enrollLink: {
+    ...typography.small,
+    color: colors.primary,
+    fontWeight: '600',
   },
   badge: {
     paddingHorizontal: spacing.md,

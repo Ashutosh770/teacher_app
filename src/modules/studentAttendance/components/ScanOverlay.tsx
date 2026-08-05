@@ -1,10 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Camera, useCameraDevice } from 'react-native-vision-camera';
+import { Camera, useCameraDevice, useCameraFormat } from 'react-native-vision-camera';
 import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
 import { GlassCard } from '../../../shared/components';
-import { faceCaptureService } from '../../../shared/services/faceCapture';
+import { faceCaptureService, FACE_PHOTO_RESOLUTION } from '../../../shared/services/faceCapture';
 import type { MatchFeedback } from '../state/studentAttendanceSlice';
 
 export interface ScanOverlayProps {
@@ -57,16 +57,30 @@ export default function ScanOverlay({
 
   // Real camera preview + capture binding (Req 10.1/11.x). Back camera, since
   // this scans a room of students rather than the device holder.
-  const cameraRef = useRef<Camera>(null);
   const device = useCameraDevice('back');
-  useEffect(() => {
-    if (cameraRef.current) {
-      faceCaptureService.attachCamera(cameraRef.current);
-    }
-    return () => {
+  /**
+   * Cap the capture resolution. Every scanned frame is now uploaded for
+   * server-side recognition, and a full-sensor JPEG takes 12–14s to send — past
+   * the per-frame timeout, so every frame failed and the scan paused itself
+   * after three. The same cap fixed the identical problem in enrollment.
+   */
+  const format = useCameraFormat(device, [{ photoResolution: FACE_PHOTO_RESOLUTION }]);
+
+  /**
+   * Attach via a callback ref rather than an effect: an effect keyed on
+   * `device` runs once, so a camera remount leaves the capture service holding
+   * a dead reference and every later capture fails while the preview still
+   * looks live.
+   */
+  const setCameraRef = useCallback((instance: Camera | null) => {
+    if (instance) {
+      faceCaptureService.attachCamera(instance);
+    } else {
       faceCaptureService.detachCamera();
-    };
-  }, [device]);
+    }
+  }, []);
+
+  useEffect(() => () => faceCaptureService.detachCamera(), []);
 
   return (
     <View style={styles.container}>
@@ -80,7 +94,15 @@ export default function ScanOverlay({
 
       <View style={styles.preview}>
         {device ? (
-          <Camera ref={cameraRef} style={StyleSheet.absoluteFill} device={device} isActive photo />
+          <Camera
+            ref={setCameraRef}
+            style={StyleSheet.absoluteFill}
+            device={device}
+            format={format}
+            photoQualityBalance="speed"
+            isActive
+            photo
+          />
         ) : (
           <LinearGradient colors={['#2D3748', '#1A202C']} style={StyleSheet.absoluteFill} />
         )}

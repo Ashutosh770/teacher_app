@@ -132,6 +132,26 @@ export async function uploadPose(
   };
 }
 
+/**
+ * Abandons an in-progress enrollment, discarding the staged photos.
+ *
+ * Best-effort and deliberately silent: the staged poses are inert either way,
+ * so a failure here is not something the user can act on and not a reason to
+ * keep them on a screen they have already left.
+ */
+export async function discardStaging(
+  personType: PersonType,
+  personId: string
+): Promise<void> {
+  try {
+    await apiService.delete(
+      `/faces/enroll/staging?personId=${encodeURIComponent(personId)}&personType=${personType}`
+    );
+  } catch {
+    /* nothing the caller can do about it */
+  }
+}
+
 /** Promotes the staged poses to the live enrollment. */
 export async function commitEnrollment(
   personType: PersonType,

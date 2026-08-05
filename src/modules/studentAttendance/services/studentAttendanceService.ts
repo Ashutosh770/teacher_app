@@ -8,13 +8,12 @@ import type {
   RosterAttendanceStatus,
 } from '../../../shared/types/attendance';
 import { faceCaptureService, type CapturedFrame } from '../../../shared/services/faceCapture';
-import {
-  faceMatchProvider,
-  type FaceMatchResult,
-  type RosterCandidate,
-} from '../../../shared/services/faceMatch';
+import { type FaceMatchResult } from '../../../shared/services/faceMatch';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
-import { faceEnrollmentService } from '../../../shared/services/faceEnrollment';
+import {
+  matchRosterOnServer,
+  type ServerScanOutcome,
+} from '../../../shared/services/serverRosterMatch';
 import {
   setRoster,
   addRosterStudent,
@@ -284,46 +283,47 @@ function generateDetectionId(): string {
 }
 
 /**
- * Build the 1:N match candidates for a frame: roster students that are
- * face-enrolled AND not already marked present this session (Req 10.2), each
- * paired with their cached FaceEnrollmentRecord. Students whose enrollment
- * record cannot be resolved are skipped rather than blocking the scan.
+ * Students eligible to be recognized in this frame: face-enrolled and not
+ * already marked present (Req 10.2).
+ *
+ * Only the COUNT is used locally, to skip a pointless round trip when there is
+ * nobody left to find. The identities go to the server as `excludeIds` so it
+ * can narrow its own gallery — the device no longer assembles a candidate set,
+ * because it has no templates to assemble one from.
  */
-async function buildCandidates(roster: RosterStudent[]): Promise<RosterCandidate[]> {
-  const eligible = roster.filter(
-    s => s.enrollmentStatus === 'enrolled' && s.attendanceStatus !== 'present',
-  );
-  const candidates: RosterCandidate[] = [];
-  for (const student of eligible) {
-    const enrollment = await faceEnrollmentService.getEnrollmentRecord(
-      'student',
-      student.id,
-    );
-    if (enrollment) {
-      candidates.push({ personId: student.id, enrollment });
-    }
-  }
-  return candidates;
+function eligibleStudentIds(roster: RosterStudent[]): string[] {
+  return roster
+    .filter(s => s.enrollmentStatus === 'enrolled' && s.attendanceStatus !== 'present')
+    .map(s => s.id);
+}
+
+/** Already recognized this session — excluded from the server's search. */
+function alreadyPresentIds(roster: RosterStudent[]): string[] {
+  return roster.filter(s => s.attendanceStatus === 'present').map(s => s.id);
 }
 
 /**
- * Race a single `matchRoster` call against the provider timeout. Resolves with
- * the provider result, or `MATCH_TIMEOUT` when `matchTimeoutMs` elapses first
- * (Req 10.8/17.3). Never rejects for the timeout path so the caller can discard
- * the frame silently.
+ * Race one server recognition against the timeout. Resolves with the result, or
+ * `MATCH_TIMEOUT` when `matchTimeoutMs` elapses first (Req 10.8/17.3).
+ *
+ * A failed request resolves to `MATCH_TIMEOUT` rather than rejecting: to the
+ * scan loop, "the server did not answer in time" and "the server could not be
+ * reached" call for the same response, and the existing consecutive-timeout
+ * counter already pauses the session when it keeps happening.
  */
 async function matchWithTimeout(
   frame: CapturedFrame,
-  candidates: RosterCandidate[],
+  classId: string,
+  excludeIds: string[],
   timeoutMs: number,
-): Promise<FaceMatchResult | typeof MATCH_TIMEOUT> {
+): Promise<ServerScanOutcome | typeof MATCH_TIMEOUT> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<typeof MATCH_TIMEOUT>(resolve => {
     timer = setTimeout(() => resolve(MATCH_TIMEOUT), timeoutMs);
   });
   try {
     return await Promise.race([
-      faceMatchProvider.matchRoster(frame, candidates),
+      matchRosterOnServer(frame, classId, excludeIds),
       timeout,
     ]);
   } finally {
@@ -331,6 +331,19 @@ async function matchWithTimeout(
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * Stops the scan with a reason the teacher can act on.
+ *
+ * Distinct from the timeout path: this is the server refusing, which repeating
+ * cannot fix, so it stops immediately rather than after three attempts.
+ */
+function haltScan(message: string): void {
+  stopFrameLoop();
+  faceCaptureService.stopPreview();
+  store.dispatch(setError(message));
+  store.dispatch(setSessionState('scan_paused'));
 }
 
 /**
@@ -458,31 +471,54 @@ async function runScanTick(): Promise<void> {
     }
 
     const roster = store.getState().studentAttendance.roster;
-    const candidates = await buildCandidates(roster);
-    if (!isScanning() || candidates.length === 0) {
+    const classId = store.getState().studentAttendance.selectedClassId;
+    // Nobody left to recognize, or no class selected: skip the round trip.
+    if (!isScanning() || !classId || eligibleStudentIds(roster).length === 0) {
       return;
     }
 
     const result = await matchWithTimeout(
       frame,
-      candidates,
-      attendanceConfig.face.matchTimeoutMs,
+      classId,
+      alreadyPresentIds(roster),
+      attendanceConfig.face.scanMatchTimeoutMs,
     );
     if (!isScanning()) {
       return;
     }
 
-    if (result === MATCH_TIMEOUT) {
+    if (result === MATCH_TIMEOUT || result.kind === 'unavailable') {
       handleTimeout();
       return;
     }
 
-    // A successful result resets the consecutive-timeout counter (Req 10.8).
+    if (result.kind === 'rejected') {
+      // Entitlement lost, class gone, malformed request — the next frame would
+      // be refused the same way, so stop and say why instead of spending three
+      // more frames arriving at a message about a slow service.
+      haltScan(result.message);
+      return;
+    }
+
+    // Any answer from the server proves it is reachable, so the consecutive-
+    // timeout counter resets — including for a frame with no face in it, which
+    // is the ordinary case while the camera is being panned across a room
+    // (Req 10.8).
     store.dispatch(resetConsecutiveTimeouts());
+
+    if (result.kind === 'no_face') {
+      // Nothing to classify and nothing worth telling the teacher: this happens
+      // several times a second during a normal scan.
+      return;
+    }
+
+    // The SERVER's threshold, not a local constant. It decided the match
+    // against the real templates; re-testing the score against a different
+    // number here could only ever disagree with it.
     const decision = classifyMatchResult(
-      result,
+      { personId: result.personId, confidence: result.confidence },
       store.getState().studentAttendance.roster,
-      attendanceConfig.face.studentThreshold,
+      result.thresholdPercent,
     );
     applyMatchDecision(decision, store.getState().studentAttendance.roster);
   } finally {
@@ -539,7 +575,11 @@ export async function startScanSession(): Promise<void> {
     return;
   }
 
-  store.dispatch(setProviderMode(faceMatchProvider.mode));
+  // 'real' unconditionally: recognition runs server-side against the stored
+  // ArcFace templates. This used to report `faceMatchProvider.mode`, which was
+  // 'mock' — the overlay's MOCK MODE banner was, correctly, telling anyone
+  // scanning that no real recognition was happening.
+  store.dispatch(setProviderMode('real'));
   store.dispatch(resetConsecutiveTimeouts());
 
   try {

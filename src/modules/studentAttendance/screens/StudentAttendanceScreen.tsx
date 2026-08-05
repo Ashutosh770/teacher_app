@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
 import { useAppDispatch, useAppSelector } from '../../../store';
 import { Feather } from '@expo/vector-icons';
@@ -84,6 +85,8 @@ export interface StudentAttendanceScreenProps {
 
 export default function StudentAttendanceScreen({ embedded = false }: StudentAttendanceScreenProps = {}) {
   const dispatch = useAppDispatch();
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const sessionState = useAppSelector(s => s.studentAttendance.sessionState);
   const roster = useAppSelector(s => s.studentAttendance.roster);
@@ -153,6 +156,18 @@ export default function StudentAttendanceScreen({ embedded = false }: StudentAtt
   const handleMark = useCallback((studentId: string, status: 'present' | 'absent') => {
     markManually(studentId, status);
   }, []);
+
+  // Opens per-student face enrollment. Only the fields the enrollment screen
+  // needs are passed: it re-reads enrollment state from the server itself, so
+  // handing it a roster row would mean two copies of a status that can differ.
+  const handleEnrollPress = useCallback(
+    (student: RosterStudent) => {
+      (navigation as any).navigate('StudentFaceEnrollment', {
+        student: { id: student.id, name: student.name, rollNo: student.rollNo },
+      });
+    },
+    [navigation],
+  );
 
   // Manual present/absent controls seam (Req 12.1, 12.3). Locked students show
   // a read-only "Face Verified" indicator with no control; everyone else gets
@@ -438,61 +453,80 @@ export default function StudentAttendanceScreen({ embedded = false }: StudentAtt
   return (
     <ScreenFrame embedded={embedded}>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.rosterTitle}>Class Roster</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => setAddVisible(true)}
-            accessibilityRole="button"
-          >
-            <Feather name="user-plus" size={14} color={colors.secondary} />
-            <Text style={styles.addButtonText}>Add Student</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Everything above the rows scrolls WITH them. Held as fixed siblings
+            these consumed most of the screen and left the roster about one row
+            tall — the stats, the scan button and the tip are all reference
+            material, and none of them earns permanent space over the list the
+            teacher is actually working through. */}
+        <RosterList
+          roster={roster}
+          renderStatusControl={renderStatusControl}
+          onEnrollPress={handleEnrollPress}
+          ListHeaderComponent={
+            <View>
+              <View style={styles.header}>
+                <Text style={styles.rosterTitle}>Class Roster</Text>
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={() => setAddVisible(true)}
+                  accessibilityRole="button"
+                >
+                  <Feather name="user-plus" size={14} color={colors.secondary} />
+                  <Text style={styles.addButtonText}>Add Student</Text>
+                </TouchableOpacity>
+              </View>
 
-        {/* Pending/failed offline-sync indicators for this module (Req 15.3, 15.5). */}
-        <SyncStatusBadge
-          pending={syncStatus.pending}
-          failed={syncStatus.failed}
-          style={styles.syncRow}
+              {/* Pending/failed offline-sync indicators (Req 15.3, 15.5). */}
+              <SyncStatusBadge
+                pending={syncStatus.pending}
+                failed={syncStatus.failed}
+                style={styles.syncRow}
+              />
+
+              <StatsCard summary={summary} />
+
+              {/* Start Batch Scan control (roster_ready). The service handles
+                  camera permission + provider mode + preview startup (Req 10.1). */}
+              <TouchableOpacity
+                style={styles.scanButton}
+                onPress={handleStartScan}
+                accessibilityRole="button"
+              >
+                <Feather name="camera" size={20} color={colors.surface} />
+                <Text style={styles.scanButtonText}>Start Batch Face Scan</Text>
+              </TouchableOpacity>
+            </View>
+          }
+          ListFooterComponent={
+            <View style={styles.infoBanner}>
+              <Text style={styles.infoBannerText}>
+                <Text style={styles.infoBannerBold}>Tip: </Text>
+                Use batch scan mode for quick face verification. Students without face
+                enrollment can be marked manually.
+              </Text>
+            </View>
+          }
         />
 
-        <StatsCard summary={summary} />
-
-        {/* Start Batch Scan control (roster_ready). The service handles camera
-            permission + provider mode + preview startup (Req 10.1). */}
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={handleStartScan}
-          accessibilityRole="button"
+        {/* Submit Attendance (Req 14.2) is the one thing that stays put: it is
+            the action that ends the session, and hunting for it at the bottom of
+            a 60-student roster would be worse than the space it costs. Bottom
+            inset only when NOT embedded — under the Attendance tab the tab bar
+            already reserves it, and padding twice leaves a gap. */}
+        <View
+          style={[
+            styles.footer,
+            { paddingBottom: embedded ? spacing.md : insets.bottom + spacing.md },
+          ]}
         >
-          <Feather name="camera" size={20} color={colors.surface} />
-          <Text style={styles.scanButtonText}>Start Batch Face Scan</Text>
-        </TouchableOpacity>
-
-        {/* Roster list with manual present/absent controls wired via
-            renderStatusControl (Req 12.1, 12.3). */}
-        <View style={styles.listWrap}>
-          <RosterList roster={roster} renderStatusControl={renderStatusControl} />
-        </View>
-
-        {/* Submit Attendance (Req 14.2). Blocks on unmarked entries via the
-            confirm_unmarked prompt above. */}
-        <TouchableOpacity
-          style={styles.submitButton}
-          onPress={handleSubmit}
-          accessibilityRole="button"
-          disabled={roster.length === 0}
-        >
-          <Text style={styles.submitButtonText}>Submit Attendance</Text>
-        </TouchableOpacity>
-
-        <View style={styles.infoBanner}>
-          <Text style={styles.infoBannerText}>
-            <Text style={styles.infoBannerBold}>Tip: </Text>
-            Use batch scan mode for quick face verification. Students without face
-            enrollment can be marked manually.
-          </Text>
+          <TouchableOpacity
+            style={styles.submitButton}
+            onPress={handleSubmit}
+            accessibilityRole="button"
+            disabled={roster.length === 0}
+          >
+            <Text style={styles.submitButtonText}>Submit Attendance</Text>
+          </TouchableOpacity>
         </View>
 
         <AddStudentModal
@@ -515,7 +549,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    padding: spacing.lg,
+    // Horizontal only. Bottom spacing now belongs to the pinned footer, and a
+    // bottom pad here would sit below it as dead space.
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
   },
   centered: {
     flex: 1,
@@ -637,7 +674,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
-    marginTop: spacing.md,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -649,11 +685,15 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontWeight: '700',
   },
-  listWrap: {
-    flex: 1,
+  footer: {
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
   },
   infoBanner: {
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
     backgroundColor: withAlpha(colors.blue, 0.08),
     borderLeftWidth: 4,
     borderLeftColor: colors.blue,

@@ -22,6 +22,16 @@ export const attendanceConfig = {
     studentThreshold: 75, // Req 10.3 — student 1:N match threshold
     captureWindowMs: 10000, // Req 5.3/5.8 — face capture window
     matchTimeoutMs: 5000, // Req 5.3/5.9/10.8 — provider match timeout
+    /**
+     * Timeout for ONE server recognition during a student batch scan.
+     *
+     * Longer than `matchTimeoutMs` because it is a different operation: that
+     * budget was set for an on-device match, while this uploads a photo and
+     * waits for face detection plus a 1:N search. At 5s every frame on a school
+     * network timed out, and three consecutive timeouts pause the scan — so the
+     * scan appeared to be broken when it was only being cut off early.
+     */
+    scanMatchTimeoutMs: 15000, // Req 10.8/17.3 — server round trip per frame
     maxStaffAttempts: 3, // Req 5.5/5.6 — staff face attempt cap
     // One frame per pose in ENROLLMENT_POSES. Each becomes its own stored
     // template, matched on whichever scores best, so more distinct poses widen
