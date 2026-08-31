@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, typography } from '../../../shared/theme';
-import { GlassCard, ProgressBar } from '../../../shared/components';
+import { colors, gradients, spacing, typography } from '../../../shared/theme';
+import { Card, ProgressBar, StatTile } from '../../../shared/components';
 import type { RosterSummary } from '../state/studentAttendanceSlice';
 
 export interface StatsCardProps {
@@ -17,65 +17,65 @@ export interface StatsCardProps {
  * selector guarantees `present + pending === total`, the card stays internally
  * consistent, and because the screen reads the selector from the store the
  * counts update live as face matches / manual marks land (Req 9.3).
+ *
+ * Built on `Card` rather than `GlassCard`: this sits on the opaque roster
+ * background where there is nothing to see through, so the blur was pure cost.
  */
 export default function StatsCard({ summary }: StatsCardProps) {
   const { present, pending, total } = summary;
-  return (
-    <GlassCard style={styles.card}>
-      <View style={styles.row}>
-        <Stat label="Present" value={present} valueStyle={styles.present} />
-        <Stat label="Pending" value={pending} valueStyle={styles.pending} />
-        <Stat label="Total" value={total} valueStyle={styles.total} />
-      </View>
-      <ProgressBar progress={total > 0 ? present / total : 0} />
-    </GlassCard>
-  );
-}
+  const fraction = total > 0 ? present / total : 0;
 
-function Stat({
-  label,
-  value,
-  valueStyle,
-}: {
-  label: string;
-  value: number;
-  valueStyle: object;
-}) {
   return (
-    <View style={styles.stat} accessibilityLabel={`${label}: ${value}`}>
-      <Text style={[styles.value, valueStyle]}>{value}</Text>
-      <Text style={styles.label}>{label}</Text>
-    </View>
+    <Card elevation="sm" padding="md" style={styles.card}>
+      <View style={styles.row}>
+        <StatTile value={present} label="Present" tone={colors.successText} />
+        <View style={styles.divider} />
+        <StatTile value={pending} label="Pending" tone={colors.warningText} />
+        <View style={styles.divider} />
+        <StatTile value={total} label="Total" tone={colors.text} />
+      </View>
+
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressLabel}>Roster progress</Text>
+        <Text style={styles.progressValue}>{Math.round(fraction * 100)}%</Text>
+      </View>
+      <ProgressBar
+        progress={fraction}
+        colors={gradients.success}
+        height={8}
+        label="Students marked present"
+      />
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   row: {
     flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: spacing.md,
   },
-  stat: {
-    flex: 1,
+  divider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: colors.border,
+  },
+  progressHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
   },
-  value: {
-    ...typography.h1,
-  },
-  present: {
-    color: colors.success,
-  },
-  pending: {
-    color: colors.warning,
-  },
-  total: {
-    color: colors.text,
-  },
-  label: {
-    ...typography.caption,
+  progressLabel: {
+    ...typography.micro,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
+  },
+  progressValue: {
+    ...typography.micro,
+    color: colors.successText,
+    fontWeight: '700',
   },
 });

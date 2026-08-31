@@ -1,13 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { borderRadius, colors, spacing, typography } from '../../../shared/theme';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { borderRadius, colors, moduleAccent, shadows, spacing, typography } from '../../../shared/theme';
+import { Button, IconChip, Input } from '../../../shared/components';
 import { addStudent } from '../services/studentAttendanceService';
 
 export interface AddStudentModalProps {
@@ -28,11 +22,7 @@ export interface AddStudentModalProps {
  * failure the specific error from the service is surfaced inline and the
  * roster is left untouched; on success the fields reset and the modal closes.
  */
-export default function AddStudentModal({
-  visible,
-  onClose,
-  onAdded,
-}: AddStudentModalProps) {
+export default function AddStudentModal({ visible, onClose, onAdded }: AddStudentModalProps) {
   const [name, setName] = useState('');
   const [rollNo, setRollNo] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -57,66 +47,61 @@ export default function AddStudentModal({
   }, [name, rollNo, onAdded, onClose]);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.overlay}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Add Student</Text>
-          <Text style={styles.subtitle}>
-            Add a student to the roster without ending the scan session.
-          </Text>
-
-          <Text style={styles.label}>Name</Text>
-          <TextInput
-            style={styles.input}
-            value={name}
-            onChangeText={setName}
-            placeholder="Student name"
-            placeholderTextColor={colors.textSecondary}
-            autoCapitalize="words"
-            returnKeyType="next"
-          />
-
-          <Text style={styles.label}>Roll Number</Text>
-          <TextInput
-            style={styles.input}
-            value={rollNo}
-            onChangeText={setRollNo}
-            placeholder="Roll number"
-            placeholderTextColor={colors.textSecondary}
-            autoCapitalize="none"
-            returnKeyType="done"
-            onSubmitEditing={handleSubmit}
-          />
-
-          {error && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorText}>{error}</Text>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      {/* Tapping the scrim dismisses. Previously the only way out was the
+          Cancel button, which is not what a scrim implies. */}
+      <Pressable style={styles.overlay} onPress={onClose} accessibilityLabel="Dismiss">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.centerer}
+        >
+          {/* Swallow presses inside the sheet so they don't reach the scrim. */}
+          <Pressable style={styles.card} onPress={() => {}}>
+            <View style={styles.header}>
+              <IconChip icon="user-plus" color={moduleAccent.students.solid} size={44} />
+              <View style={styles.headerText}>
+                <Text style={styles.title}>Add student</Text>
+                <Text style={styles.subtitle}>The scan session stays running.</Text>
+              </View>
             </View>
-          )}
 
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={[styles.button, styles.buttonSecondary]}
-              onPress={onClose}
-              accessibilityRole="button"
-            >
-              <Text style={styles.buttonSecondaryText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.buttonPrimary]}
-              onPress={handleSubmit}
-              accessibilityRole="button"
-            >
-              <Text style={styles.buttonPrimaryText}>Add Student</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+            <Input
+              label="Name"
+              value={name}
+              onChangeText={setName}
+              placeholder="Student name"
+              icon="user"
+              autoCapitalize="words"
+              returnKeyType="next"
+              containerStyle={styles.field}
+            />
+
+            <Input
+              label="Roll number"
+              value={rollNo}
+              onChangeText={setRollNo}
+              placeholder="e.g. 24"
+              icon="hash"
+              autoCapitalize="none"
+              returnKeyType="done"
+              onSubmitEditing={handleSubmit}
+              error={error}
+              containerStyle={styles.field}
+            />
+
+            <View style={styles.actions}>
+              <Button label="Cancel" variant="outline" onPress={onClose} style={styles.action} />
+              <Button
+                label="Add"
+                icon="plus"
+                onPress={handleSubmit}
+                tone={{ gradient: moduleAccent.students.gradient }}
+                style={styles.action}
+              />
+            </View>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Pressable>
     </Modal>
   );
 }
@@ -124,9 +109,11 @@ export default function AddStudentModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    backgroundColor: colors.scrim,
+  },
+  centerer: {
+    flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
     padding: spacing.lg,
   },
   card: {
@@ -134,75 +121,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: borderRadius.xl,
     padding: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
+    ...shadows.lg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.smd,
+    marginBottom: spacing.lg,
+  },
+  headerText: {
+    flex: 1,
   },
   title: {
     ...typography.h3,
     color: colors.text,
-    marginBottom: spacing.xs,
   },
   subtitle: {
-    ...typography.caption,
+    ...typography.small,
     color: colors.textSecondary,
-    marginBottom: spacing.lg,
+    marginTop: spacing.xxs,
   },
-  label: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-    fontWeight: '600',
-  },
-  input: {
-    ...typography.body,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  field: {
     marginBottom: spacing.md,
-    backgroundColor: colors.background,
-  },
-  errorBanner: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  errorText: {
-    ...typography.caption,
-    color: colors.error,
-    fontWeight: '600',
   },
   actions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    gap: spacing.smd,
     marginTop: spacing.sm,
   },
-  button: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
-    marginLeft: spacing.sm,
-  },
-  buttonSecondary: {
-    backgroundColor: colors.border,
-  },
-  buttonSecondaryText: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '600',
-  },
-  buttonPrimary: {
-    backgroundColor: colors.secondary,
-  },
-  buttonPrimaryText: {
-    ...typography.body,
-    color: colors.surface,
-    fontWeight: '600',
+  action: {
+    flex: 1,
   },
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import { colors, spacing, typography } from '../theme';
 
 interface Props {
@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.h2,
-    color: colors.error,
+    color: colors.errorText,
     marginBottom: spacing.sm,
   },
   message: {

@@ -20,13 +20,13 @@
  * nothing is bypassed; only the prompt is deferred.
  */
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, spacing } from '../../../shared/theme';
+import { colors, spacing, typography } from '../../../shared/theme';
+import { Pressable } from '../../../shared/components';
 import { useAppDispatch, useAppSelector } from '../../../store';
 import { loadRegistrationStatus } from '../state/registrationSlice';
 import ConsentScreen from './ConsentScreen';
-import FaceEnrollmentScreen from '../../staffAttendance/screens/FaceEnrollmentScreen';
 
 export default function RegistrationGate({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch();
@@ -53,7 +53,8 @@ export default function RegistrationGate({ children }: { children: React.ReactNo
   if (status === 'unknown' || status === 'loading') {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Checking your registration…</Text>
       </View>
     );
   }
@@ -63,6 +64,16 @@ export default function RegistrationGate({ children }: { children: React.ReactNo
   }
 
   if (status === 'ready' && data?.nextStep === 'capture' && !skippedCapture) {
+    // Required lazily, inside render, for the same reason `AppNavigator` uses
+    // `getComponent` for every camera screen: this gate is mounted for EVERY
+    // authenticated session, so a top-level import pulled the whole
+    // `react-native-vision-camera` chain in at app boot. On any platform the
+    // native module is missing (web, or a device where it is not ready when the
+    // JS bundle first executes) that threw before the first screen rendered and
+    // produced a blank app with no catchable error.
+    const FaceEnrollmentScreen =
+      require('../../staffAttendance/screens/FaceEnrollmentScreen').default;
+
     return (
       <View style={[styles.captureWrap, { paddingTop: insets.top }]}>
         <View style={styles.captureScreen}>
@@ -74,9 +85,11 @@ export default function RegistrationGate({ children }: { children: React.ReactNo
           // is both hard to hit and easy to trigger by accident.
           style={[styles.skip, { paddingBottom: insets.bottom + spacing.sm }]}
           onPress={() => setSkippedCapture(true)}
+          dimOnPress
           accessibilityRole="button"
+          accessibilityLabel="Skip face enrollment for now"
         >
-          <Text style={styles.skipText}>Skip for now — I'll enroll later</Text>
+          <Text style={styles.skipText}>Skip for now — I&apos;ll enroll later</Text>
         </Pressable>
       </View>
     );
@@ -86,11 +99,31 @@ export default function RegistrationGate({ children }: { children: React.ReactNo
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.background,
+  },
+  loadingText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
   captureWrap: { flex: 1, backgroundColor: colors.background },
   captureScreen: { flex: 1 },
-  skip: { paddingTop: spacing.md, alignItems: 'center' },
+  skip: {
+    paddingTop: spacing.smd,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
   // Understated on purpose: skipping is supported (attendance falls back to
   // manual marking) but it should not read as the expected path.
-  skipText: { fontSize: 13, color: colors.textSecondary, textDecorationLine: 'underline' },
+  skipText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textDecorationLine: 'underline',
+  },
 });

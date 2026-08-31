@@ -1,8 +1,16 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { borderRadius, colors, spacing, typography } from '../../../shared/theme';
-import { GradientHeader, PermissionGate } from '../../../shared/components';
+import {
+  borderRadius,
+  colors,
+  moduleAccent,
+  motion,
+  shadows,
+  spacing,
+  typography,
+} from '../../../shared/theme';
+import { Pressable, PermissionGate, ScreenHeader } from '../../../shared/components';
 import { useAppSelector } from '../../../store';
 import {
   STAFF_ATTENDANCE_MODULE_KEY,
@@ -14,11 +22,11 @@ import StudentAttendanceScreen from '../../studentAttendance/screens/StudentAtte
 type Mode = 'staff' | 'student';
 
 /**
- * Shell for the single "Attendance" bottom tab (Figma's `AttendanceScreen.tsx`
- * only models self-attendance, but this app has two distinct real attendance
- * flows — marking your own presence and scanning a class roster — so this
- * screen improvises a mode switcher in the shared navy header instead of
- * giving each its own bottom tab, keeping the 5-tab bar matching the design).
+ * Shell for the single "Attendance" bottom tab.
+ *
+ * This app has two distinct real attendance flows — marking your own presence
+ * and scanning a class roster — so rather than spend two of the five bottom
+ * tabs on them, both live here behind a segmented control in the shared header.
  */
 export default function AttendanceTabScreen() {
   const [mode, setMode] = useState<Mode>('staff');
@@ -31,24 +39,13 @@ export default function AttendanceTabScreen() {
 
   return (
     <View style={styles.screen}>
-      <GradientHeader title="Mark Attendance">
-        {showSwitcher && (
-          <View style={styles.switcher}>
-            <SwitchButton
-              label="My Attendance"
-              icon="check-circle"
-              active={activeMode === 'staff'}
-              onPress={() => setMode('staff')}
-            />
-            <SwitchButton
-              label="Student Attendance"
-              icon="users"
-              active={activeMode === 'student'}
-              onPress={() => setMode('student')}
-            />
-          </View>
-        )}
-      </GradientHeader>
+      <ScreenHeader
+        title="Mark Attendance"
+        subtitle={activeMode === 'staff' ? 'Verify your location and face' : 'Scan the class roster'}
+        gradientColors={moduleAccent.attendance.gradient}
+      >
+        {showSwitcher && <ModeSwitcher mode={activeMode} onChange={setMode} />}
+      </ScreenHeader>
 
       <View style={styles.body}>
         {activeMode === 'staff' ? (
@@ -65,6 +62,67 @@ export default function AttendanceTabScreen() {
   );
 }
 
+/**
+ * Segmented control on the header glass.
+ *
+ * The active thumb is a single sliding layer rather than a per-button
+ * background swap, so switching modes reads as one continuous movement.
+ */
+function ModeSwitcher({ mode, onChange }: { mode: Mode; onChange: (mode: Mode) => void }) {
+  const slide = useRef(new Animated.Value(mode === 'staff' ? 0 : 1)).current;
+  // Measured rather than expressed as a percentage: how Yoga resolves a
+  // percentage on an absolutely-positioned child against a padded parent is
+  // not worth depending on, and the travel distance is exactly one segment.
+  const [segmentWidth, setSegmentWidth] = useState(0);
+
+  useEffect(() => {
+    Animated.timing(slide, {
+      toValue: mode === 'staff' ? 0 : 1,
+      duration: motion.duration.normal,
+      easing: motion.easing.standard,
+      useNativeDriver: true,
+    }).start();
+  }, [mode, slide]);
+
+  return (
+    <View
+      style={styles.switcher}
+      onLayout={e => setSegmentWidth((e.nativeEvent.layout.width - spacing.xs * 2) / 2)}
+    >
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.thumb,
+          {
+            width: segmentWidth,
+            opacity: segmentWidth > 0 ? 1 : 0,
+            transform: [
+              {
+                translateX: slide.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, segmentWidth],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+      <SwitchButton
+        label="My Attendance"
+        icon="check-circle"
+        active={mode === 'staff'}
+        onPress={() => onChange('staff')}
+      />
+      <SwitchButton
+        label="Students"
+        icon="users"
+        active={mode === 'student'}
+        onPress={() => onChange('student')}
+      />
+    </View>
+  );
+}
+
 function SwitchButton({
   label,
   icon,
@@ -76,17 +134,21 @@ function SwitchButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const tint = active ? colors.primaryText : colors.textInverse;
   return (
-    <TouchableOpacity
-      style={[styles.switchButton, active && styles.switchButtonActive]}
+    <Pressable
       onPress={onPress}
-      accessibilityRole="button"
+      activeScale={0.98}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
+      style={styles.switchButton}
     >
-      <Feather name={icon} size={15} color={active ? colors.primary : colors.surface} />
-      <Text style={[styles.switchButtonText, active && styles.switchButtonTextActive]} numberOfLines={1}>
+      <Feather name={icon} size={15} color={tint} />
+      <Text style={[styles.switchButtonText, { color: tint }]} numberOfLines={1}>
         {label}
       </Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -98,29 +160,31 @@ const styles = StyleSheet.create({
   switcher: {
     flexDirection: 'row',
     backgroundColor: colors.glassLight,
-    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    borderRadius: borderRadius.md,
     padding: spacing.xs,
-    gap: spacing.xs,
+  },
+  thumb: {
+    position: 'absolute',
+    top: spacing.xs,
+    bottom: spacing.xs,
+    left: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.sm,
+    ...shadows.sm,
   },
   switchButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.sm + spacing.xs,
-    borderRadius: borderRadius.md,
-  },
-  switchButtonActive: {
-    backgroundColor: colors.surface,
+    gap: spacing.xs + 2,
+    paddingVertical: spacing.smd - 2,
+    borderRadius: borderRadius.sm,
   },
   switchButtonText: {
-    ...typography.caption,
-    fontWeight: '700',
-    color: colors.surface,
-  },
-  switchButtonTextActive: {
-    color: colors.primary,
+    ...typography.captionBold,
   },
   body: {
     flex: 1,

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
-import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
-import { GradientHeader } from '../../../shared/components';
+import { borderRadius, colors, moduleAccent, spacing, typography, withAlpha } from '../../../shared/theme';
+import { Card, EmptyState, IconChip, Pressable, ScreenHeader, StatusPill } from '../../../shared/components';
+import type { StatusPillTone } from '../../../shared/components';
 import { useAppSelector } from '../../../store';
 import { loadLeaveData, LEAVE_TYPES } from '../services/leaveManagementService';
 import type { LeaveRequest } from '../../../shared/types';
@@ -15,6 +16,15 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
 ];
+
+const TONE: Record<
+  Tab,
+  { color: string; text: string; tone: StatusPillTone; icon: keyof typeof Feather.glyphMap; label: string }
+> = {
+  pending: { color: colors.warning, text: colors.warningText, tone: 'warning', icon: 'clock', label: 'Pending' },
+  approved: { color: colors.success, text: colors.successText, tone: 'success', icon: 'check-circle', label: 'Approved' },
+  rejected: { color: colors.error, text: colors.errorText, tone: 'error', icon: 'x-circle', label: 'Rejected' },
+};
 
 function leaveTypeName(code: string): string {
   return LEAVE_TYPES.find(t => t.code === code)?.name ?? code;
@@ -29,21 +39,15 @@ function formatDate(iso: string): string {
 function dateRangeLabel(request: LeaveRequest): string {
   const start = formatDate(request.startDate);
   const end = formatDate(request.endDate);
-  return start === end ? start : `${start} - ${end}`;
+  return start === end ? start : `${start} – ${end}`;
 }
 
 function dayCount(request: LeaveRequest): number {
   const start = new Date(request.startDate).getTime();
   const end = new Date(request.endDate).getTime();
   if (Number.isNaN(start) || Number.isNaN(end)) return 1;
-  return Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1);
+  return Math.max(1, Math.round((end - start) / 86_400_000) + 1);
 }
-
-const TONE: Record<Tab, { color: string; icon: keyof typeof Feather.glyphMap; label: string }> = {
-  pending: { color: colors.warning, icon: 'clock', label: 'Pending' },
-  approved: { color: colors.secondary, icon: 'check-circle', label: 'Approved' },
-  rejected: { color: colors.error, icon: 'x-circle', label: 'Rejected' },
-};
 
 export default function LeaveStatusScreen() {
   const navigation = useNavigation();
@@ -54,41 +58,79 @@ export default function LeaveStatusScreen() {
     void loadLeaveData();
   }, []);
 
+  // Counts live on the tabs themselves — previously you had to open each tab to
+  // learn whether it held anything.
+  const counts = useMemo(
+    () =>
+      requests.reduce<Record<Tab, number>>(
+        (acc, r) => {
+          if (r.status in acc) acc[r.status as Tab] += 1;
+          return acc;
+        },
+        { pending: 0, approved: 0, rejected: 0 },
+      ),
+    [requests],
+  );
+
   const filtered = useMemo(
     () => requests.filter(r => r.status === activeTab),
-    [requests, activeTab]
+    [requests, activeTab],
   );
 
   return (
     <View style={styles.screen}>
-      <GradientHeader title="Leave Status" onBack={() => navigation.goBack()}>
+      <ScreenHeader
+        title="Leave Status"
+        subtitle="Track your applications"
+        gradientColors={moduleAccent.leave.gradient}
+        onBack={() => navigation.goBack()}
+      >
         <View style={styles.tabRow}>
           {TABS.map(tab => {
             const active = tab.key === activeTab;
             return (
-              <TouchableOpacity
+              <Pressable
                 key={tab.key}
-                style={[styles.tab, active && styles.tabActive]}
                 onPress={() => setActiveTab(tab.key)}
-                accessibilityRole="button"
+                activeScale={0.97}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${tab.label}, ${counts[tab.key]}`}
+                style={[styles.tab, active && styles.tabActive]}
               >
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
-              </TouchableOpacity>
+                <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
+                  {tab.label}
+                </Text>
+                {counts[tab.key] > 0 ? (
+                  <View style={[styles.tabCount, active && styles.tabCountActive]}>
+                    <Text style={[styles.tabCountText, active && styles.tabCountTextActive]}>
+                      {counts[tab.key]}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
             );
           })}
         </View>
-      </GradientHeader>
+      </ScreenHeader>
 
       <FlatList
         data={filtered}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
         renderItem={({ item }) => <LeaveStatusCard request={item} />}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Feather name={TONE[activeTab].icon} size={32} color={colors.disabled} />
-            <Text style={styles.emptyText}>No {TONE[activeTab].label.toLowerCase()} leave requests</Text>
-          </View>
+          <EmptyState
+            icon={TONE[activeTab].icon}
+            tone={activeTab === 'pending' ? 'warning' : activeTab === 'approved' ? 'success' : 'error'}
+            title={`No ${TONE[activeTab].label.toLowerCase()} requests`}
+            message={
+              activeTab === 'pending'
+                ? 'Applications awaiting a decision will show up here.'
+                : `Nothing has been ${TONE[activeTab].label.toLowerCase()} yet.`
+            }
+          />
         }
       />
     </View>
@@ -97,37 +139,43 @@ export default function LeaveStatusScreen() {
 
 function LeaveStatusCard({ request }: { request: LeaveRequest }) {
   const tone = TONE[request.status];
+  const days = dayCount(request);
+
   return (
-    <View style={[styles.card, { borderLeftColor: tone.color }]}>
+    <Card elevation="sm" padding="md" style={styles.card}>
+      <View style={[styles.cardRail, { backgroundColor: tone.color }]} />
+
       <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          <View style={[styles.iconChip, { backgroundColor: withAlpha(tone.color, 0.1) }]}>
-            <Feather name={tone.icon} size={20} color={tone.color} />
-          </View>
-          <View>
-            <Text style={styles.cardTitle}>{leaveTypeName(request.leaveType)}</Text>
-            <View style={styles.cardMetaRow}>
-              <Feather name="calendar" size={13} color={colors.textSecondary} />
-              <Text style={styles.cardMeta}>{dateRangeLabel(request)}</Text>
-              <Text style={styles.cardMeta}>
-                • {dayCount(request)} day{dayCount(request) > 1 ? 's' : ''}
-              </Text>
-            </View>
+        <IconChip icon={tone.icon} color={tone.color} size={42} />
+
+        <View style={styles.cardHeaderText}>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {leaveTypeName(request.leaveType)}
+          </Text>
+          <View style={styles.cardMetaRow}>
+            <Feather name="calendar" size={12} color={colors.textSecondary} />
+            <Text style={styles.cardMeta} numberOfLines={1}>
+              {dateRangeLabel(request)}
+            </Text>
+            <View style={styles.metaDot} />
+            <Text style={styles.cardMeta}>
+              {days} day{days > 1 ? 's' : ''}
+            </Text>
           </View>
         </View>
-        <View style={[styles.statusPill, { backgroundColor: withAlpha(tone.color, 0.1) }]}>
-          {request.status === 'pending' && <View style={[styles.pulseDot, { backgroundColor: tone.color }]} />}
-          <Text style={[styles.statusPillText, { color: tone.color }]}>{tone.label}</Text>
+
+        <StatusPill label={tone.label} tone={tone.tone} />
+      </View>
+
+      {!!request.reason && (
+        <View style={styles.reasonBox}>
+          <Text style={styles.reasonLabel}>REASON</Text>
+          <Text style={styles.reasonValue}>{request.reason}</Text>
         </View>
-      </View>
+      )}
 
-      <View style={styles.reasonBox}>
-        <Text style={styles.reasonLabel}>Reason</Text>
-        <Text style={styles.reasonValue}>{request.reason}</Text>
-      </View>
-
-      <Text style={styles.footerText}>Submitted on {formatDate(request.submittedAt)}</Text>
-    </View>
+      <Text style={styles.footerText}>Submitted {formatDate(request.submittedAt)}</Text>
+    </Card>
   );
 }
 
@@ -136,120 +184,118 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+
+  /* Tabs */
   tabRow: {
     flexDirection: 'row',
     backgroundColor: colors.glassLight,
-    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    borderRadius: borderRadius.md,
     padding: spacing.xs,
     gap: spacing.xs,
   },
   tab: {
     flex: 1,
-    paddingVertical: spacing.sm + spacing.xs,
-    borderRadius: borderRadius.md,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.sm,
   },
   tabActive: {
     backgroundColor: colors.surface,
   },
   tabText: {
-    ...typography.caption,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.7)',
+    ...typography.captionBold,
+    color: withAlpha(colors.overlayLight, 0.75),
   },
   tabTextActive: {
-    color: colors.primary,
+    color: colors.primaryText,
   },
+  tabCount: {
+    minWidth: 18,
+    paddingHorizontal: spacing.xs,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.glassLight,
+    alignItems: 'center',
+  },
+  tabCountActive: {
+    backgroundColor: withAlpha(colors.primary, 0.14),
+  },
+  tabCountText: {
+    ...typography.micro,
+    fontWeight: '700',
+    color: colors.textInverse,
+  },
+  tabCountTextActive: {
+    color: colors.primaryText,
+  },
+
+  /* List */
   list: {
     padding: spacing.lg,
-    gap: spacing.md,
+    paddingBottom: spacing.xxl,
+    gap: spacing.smd,
   },
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    borderLeftWidth: 4,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    paddingLeft: spacing.md + 4,
+  },
+  cardRail: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 4,
   },
   cardHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    alignItems: 'center',
+    gap: spacing.smd,
+    marginBottom: spacing.smd,
   },
-  cardHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm + spacing.xs,
+  cardHeaderText: {
     flex: 1,
-  },
-  iconChip: {
-    padding: spacing.sm + spacing.xs,
-    borderRadius: borderRadius.lg,
   },
   cardTitle: {
     ...typography.bodyBold,
     color: colors.text,
-    marginBottom: spacing.xs,
   },
   cardMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    marginTop: spacing.xxs,
   },
   cardMeta: {
-    ...typography.caption,
+    ...typography.small,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+  metaDot: {
+    width: 3,
+    height: 3,
     borderRadius: borderRadius.full,
-  },
-  pulseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: borderRadius.full,
-  },
-  statusPillText: {
-    ...typography.caption,
-    fontWeight: '700',
+    backgroundColor: colors.textTertiary,
   },
   reasonBox: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm + spacing.xs,
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: borderRadius.sm,
+    padding: spacing.smd,
+    marginBottom: spacing.sm,
   },
   reasonLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
+    ...typography.label,
+    color: colors.textTertiary,
     marginBottom: spacing.xs,
   },
   reasonValue: {
-    ...typography.body,
-    fontWeight: '600',
+    ...typography.caption,
     color: colors.text,
   },
   footerText: {
-    ...typography.small,
-    color: colors.textSecondary,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxl,
-    gap: spacing.sm,
-  },
-  emptyText: {
-    ...typography.body,
-    color: colors.textSecondary,
+    ...typography.micro,
+    color: colors.textTertiary,
   },
 });

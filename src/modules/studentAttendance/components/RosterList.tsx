@@ -1,27 +1,24 @@
 import React, { useCallback } from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
-import { StatusPill } from '../../../shared/components';
-import type {
-  RosterAttendanceStatus,
-  RosterStudent,
-} from '../../../shared/types/attendance';
+import { borderRadius, colors, moduleAccent, spacing, typography, withAlpha } from '../../../shared/theme';
+import { Card, EmptyState, Pressable, StatusPill } from '../../../shared/components';
+import type { StatusPillTone } from '../../../shared/components';
+import type { RosterAttendanceStatus, RosterStudent } from '../../../shared/types/attendance';
 
 export interface RosterListProps {
   /** Students in the order held in state (already roll-number sorted). */
   roster: RosterStudent[];
   /**
-   * Seam for task 14.2: render the manual present/absent control (or a locked
-   * "Face Verified" indicator) for a student. When omitted the row shows the
-   * read-only attendance status badge only. Task 14.1 does not wire manual
-   * marking, so this is left unimplemented here.
+   * Renders the manual present/absent control (or a locked "Face Verified"
+   * indicator) for a student. When omitted the row shows the read-only
+   * attendance status badge only.
    */
   renderStatusControl?: (student: RosterStudent) => React.ReactNode;
   /**
    * Opens face enrollment for one student. Optional so the list stays usable
    * (and testable) without a navigator; when omitted the face status renders as
-   * a plain, non-interactive label exactly as before.
+   * a plain, non-interactive label.
    */
   onEnrollPress?: (student: RosterStudent) => void;
   /**
@@ -39,15 +36,12 @@ export interface RosterListProps {
 }
 
 /**
- * Read-only roster list (Req 9.1).
+ * Roster list (Req 9.1).
  *
- * Each row shows the student's name, roll number, face-enrollment status
- * (Enrolled / Not Enrolled), and current attendance status as a color-coded
- * badge — `success` for present, `warning` for pending, `error` for absent, and
- * a neutral tone for unmarked. Rows preserve the roster order held in state.
- *
- * The manual marking controls are intentionally NOT wired here; they are added
- * in task 14.2 via the optional `renderStatusControl` seam.
+ * Each row shows the student's roll number, name, face-enrollment status and
+ * current attendance status. Present rows carry a tinted fill and an accent
+ * rail so a scanned class reads as progress down the list rather than as a
+ * uniform wall of white cards.
  */
 export default function RosterList({
   roster,
@@ -58,11 +52,7 @@ export default function RosterList({
 }: RosterListProps) {
   const renderItem = useCallback(
     ({ item }: { item: RosterStudent }) => (
-      <RosterRow
-        student={item}
-        renderStatusControl={renderStatusControl}
-        onEnrollPress={onEnrollPress}
-      />
+      <RosterRow student={item} renderStatusControl={renderStatusControl} onEnrollPress={onEnrollPress} />
     ),
     [renderStatusControl, onEnrollPress],
   );
@@ -79,16 +69,20 @@ export default function RosterList({
       renderItem={renderItem}
       contentContainerStyle={styles.listContent}
       ItemSeparatorComponent={Separator}
-      showsVerticalScrollIndicator
+      showsVerticalScrollIndicator={false}
       ListHeaderComponent={ListHeaderComponent}
       ListFooterComponent={ListFooterComponent}
       // Rendered through the list rather than returned early, so an empty
       // roster still shows the stats and the scan button above it instead of a
       // bare sentence on an otherwise blank screen.
       ListEmptyComponent={
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No students in this roster yet.</Text>
-        </View>
+        <EmptyState
+          icon="users"
+          tone="info"
+          title="No students yet"
+          message="Add students to this roster to start taking attendance."
+          compact
+        />
       }
     />
   );
@@ -108,60 +102,82 @@ function RosterRow({
   onEnrollPress?: (student: RosterStudent) => void;
 }) {
   const isPresent = student.attendanceStatus === 'present';
+  const isAbsent = student.attendanceStatus === 'absent';
+  const rail = isPresent ? colors.success : isAbsent ? colors.error : colors.border;
+
   return (
-    <View style={[styles.row, isPresent && styles.rowPresent]}>
-      <View style={[styles.avatar, isPresent && styles.avatarPresent]}>
-        <Text style={[styles.avatarText, isPresent && styles.avatarTextPresent]}>{student.rollNo}</Text>
-      </View>
-      <View style={styles.rowMain}>
-        <Text style={styles.name} numberOfLines={1}>
-          {student.name}
-        </Text>
-        <View style={styles.metaRow}>
+    <Card
+      elevation="xs"
+      padding="none"
+      bordered={!isPresent}
+      backgroundColor={isPresent ? withAlpha(colors.success, 0.05) : colors.surface}
+      style={[styles.row, isPresent && styles.rowPresent]}
+    >
+      <View style={[styles.rail, { backgroundColor: rail }]} />
+
+      <View style={styles.rowInner}>
+        <View style={[styles.avatar, isPresent && styles.avatarPresent]}>
+          <Text style={[styles.avatarText, isPresent && styles.avatarTextPresent]} numberOfLines={1}>
+            {student.rollNo}
+          </Text>
+        </View>
+
+        <View style={styles.rowMain}>
+          <Text style={styles.name} numberOfLines={1}>
+            {student.name}
+          </Text>
+
           {onEnrollPress ? (
             // The face status doubles as the way in to enrollment: it is the
-            // part of the row that states the problem ("No Face Data"), so it
+            // part of the row that states the problem ("No face data"), so it
             // is where a teacher looks when they want to fix it.
-            <TouchableOpacity
-              style={styles.faceStatusRow}
+            <Pressable
               onPress={() => onEnrollPress(student)}
+              dimOnPress
+              activeScale={0.97}
               accessibilityRole="button"
               accessibilityLabel={
                 student.enrollmentStatus === 'enrolled'
                   ? `Re-enroll ${student.name}'s face`
                   : `Enroll ${student.name}'s face`
               }
+              style={styles.faceStatusRow}
             >
               <RosterFaceStatus student={student} />
               {student.enrollmentStatus !== 'enrolled' && (
-                <Text style={styles.enrollLink}>Enroll</Text>
+                <View style={styles.enrollLinkRow}>
+                  <Text style={styles.enrollLink}>Enroll</Text>
+                  <Feather name="chevron-right" size={12} color={moduleAccent.students.text} />
+                </View>
               )}
-            </TouchableOpacity>
+            </Pressable>
           ) : (
-            <RosterFaceStatus student={student} />
+            <View style={styles.faceStatusRow}>
+              <RosterFaceStatus student={student} />
+            </View>
+          )}
+        </View>
+
+        <View style={styles.rowTrailing}>
+          {renderStatusControl ? (
+            renderStatusControl(student)
+          ) : (
+            <StatusBadge status={student.attendanceStatus} />
           )}
         </View>
       </View>
-      <View style={styles.rowTrailing}>
-        {renderStatusControl ? (
-          renderStatusControl(student)
-        ) : isPresent ? (
-          <Feather name="check-circle" size={26} color={colors.success} />
-        ) : (
-          <StatusBadge status={student.attendanceStatus} />
-        )}
-      </View>
-    </View>
+    </Card>
   );
 }
 
-/** Two-part face-verification status: "Face Verified 96%" / "Not Scanned" / "No Face Data". */
+/** Two-part face-verification status: "Face verified 96%" / "Not scanned" / "No face data". */
 function RosterFaceStatus({ student }: { student: RosterStudent }) {
   const enrolled = student.enrollmentStatus === 'enrolled';
+
   if (student.attendanceStatus === 'present' && student.statusSource === 'face_match') {
     return (
       <View style={styles.faceStatusRow}>
-        <StatusPill label="Face Verified" tone="success" />
+        <StatusPill label="Face verified" tone="success" icon="check-circle" />
         {student.faceMatchConfidence != null && (
           <Text style={styles.confidenceText}>{Math.round(student.faceMatchConfidence)}%</Text>
         )}
@@ -169,9 +185,9 @@ function RosterFaceStatus({ student }: { student: RosterStudent }) {
     );
   }
   if (enrolled) {
-    return <StatusPill label="Not Scanned" tone="warning" />;
+    return <StatusPill label="Not scanned" tone="warning" />;
   }
-  return <StatusPill label="No Face Data" tone="neutral" />;
+  return <StatusPill label="No face data" tone="neutral" icon="user-x" />;
 }
 
 const STATUS_LABEL: Record<RosterAttendanceStatus, string> = {
@@ -181,25 +197,15 @@ const STATUS_LABEL: Record<RosterAttendanceStatus, string> = {
   unmarked: 'Unmarked',
 };
 
-export function StatusBadge({ status }: { status: RosterAttendanceStatus }) {
-  return (
-    <View style={[styles.badge, badgeStyleFor(status)]}>
-      <Text style={styles.badgeText}>{STATUS_LABEL[status]}</Text>
-    </View>
-  );
-}
+const STATUS_TONE: Record<RosterAttendanceStatus, StatusPillTone> = {
+  present: 'success',
+  pending: 'warning',
+  absent: 'error',
+  unmarked: 'neutral',
+};
 
-function badgeStyleFor(status: RosterAttendanceStatus) {
-  switch (status) {
-    case 'present':
-      return styles.badgePresent;
-    case 'pending':
-      return styles.badgePending;
-    case 'absent':
-      return styles.badgeAbsent;
-    case 'unmarked':
-      return styles.badgeUnmarked;
-  }
+export function StatusBadge({ status }: { status: RosterAttendanceStatus }) {
+  return <StatusPill label={STATUS_LABEL[status]} tone={STATUS_TONE[status]} size="md" />;
 }
 
 const styles = StyleSheet.create({
@@ -210,99 +216,80 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
+    overflow: 'hidden',
   },
   rowPresent: {
-    borderColor: withAlpha(colors.success, 0.4),
+    borderWidth: 1,
+    borderColor: withAlpha(colors.success, 0.3),
+  },
+  rail: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 3,
+  },
+  rowInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.smd,
+    paddingVertical: spacing.smd,
+    paddingLeft: spacing.smd + 3,
+    paddingRight: spacing.smd,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.background,
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSunken,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
   avatarPresent: {
-    backgroundColor: withAlpha(colors.success, 0.2),
+    backgroundColor: withAlpha(colors.success, 0.14),
+    borderColor: withAlpha(colors.success, 0.3),
   },
   avatarText: {
-    ...typography.bodyBold,
+    ...typography.captionBold,
     color: colors.textSecondary,
   },
   avatarTextPresent: {
-    color: colors.success,
+    color: colors.successText,
   },
   rowMain: {
     flex: 1,
-    marginRight: spacing.md,
+    gap: spacing.xs,
   },
   rowTrailing: {
     alignItems: 'flex-end',
   },
   name: {
-    ...typography.body,
+    ...typography.bodyBold,
     color: colors.text,
-    fontWeight: '700',
-    marginBottom: spacing.xs,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   faceStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.xs + 2,
   },
   confidenceText: {
-    ...typography.small,
-    color: colors.textSecondary,
+    ...typography.micro,
+    color: colors.successText,
+    fontWeight: '700',
+  },
+  enrollLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   enrollLink: {
-    ...typography.small,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  badge: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-  },
-  badgeText: {
-    ...typography.small,
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  badgePresent: {
-    backgroundColor: colors.success,
-  },
-  badgePending: {
-    backgroundColor: colors.warning,
-  },
-  badgeAbsent: {
-    backgroundColor: colors.error,
-  },
-  badgeUnmarked: {
-    backgroundColor: colors.textSecondary,
+    ...typography.micro,
+    color: moduleAccent.students.text,
+    fontWeight: '700',
   },
   separator: {
     height: spacing.sm,
-  },
-  emptyState: {
-    padding: spacing.xl,
-    alignItems: 'center',
-  },
-  emptyText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
   },
 });

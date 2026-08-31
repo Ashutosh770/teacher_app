@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { DefaultTheme, NavigationContainer, Theme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '../store';
 import { colors } from '../shared/theme';
-import { PermissionGate } from '../shared/components';
+import { BrandSplash, PermissionGate } from '../shared/components';
+import TabBar from './TabBar';
 import { useOfflineSyncProcessor } from '../modules/offlineSync';
 import { restoreSession } from '../modules/auth/services/authService';
 import { loginFailure, loginSuccess } from '../modules/auth/state/authSlice';
@@ -39,6 +39,23 @@ const StaffAttendanceStack = createNativeStackNavigator();
 const LeaveManagementStack = createNativeStackNavigator();
 
 /**
+ * Navigation container theme. Without this the container's default background
+ * is pure white, which flashes against `colors.background` (slate-100) during
+ * every push/pop transition.
+ */
+const navigationTheme: Theme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.surface,
+    text: colors.text,
+    border: colors.border,
+  },
+};
+
+/**
  * Attendance sub-navigator. The home route is `AttendanceTabScreen`, which
  * improvises a mode switcher between staff self-attendance and student
  * roster scanning under one shared header (Req 16.3 gating is enforced inside
@@ -55,11 +72,11 @@ const LeaveManagementStack = createNativeStackNavigator();
  */
 function StaffAttendanceNavigator() {
   return (
-    <StaffAttendanceStack.Navigator screenOptions={{ headerShown: true }}>
+    <StaffAttendanceStack.Navigator screenOptions={{ headerShown: false }}>
       <StaffAttendanceStack.Screen
         name="StaffAttendanceHome"
         getComponent={() => require('../modules/attendance/screens/AttendanceTabScreen').default}
-        options={{ title: 'Attendance', headerShown: false }}
+        options={{ title: 'Attendance' }}
       />
       <StaffAttendanceStack.Screen
         name="FaceEnrollment"
@@ -125,11 +142,10 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
-      screenOptions={{
-        tabBarActiveTintColor: colors.secondary,
-        tabBarInactiveTintColor: colors.textSecondary,
-        headerShown: false,
-      }}
+      // Tints are resolved inside `TabBar` (it needs the AA-safe `primaryText`
+      // step, not a fill), so the navigator only carries structural options.
+      tabBar={props => <TabBar {...props} />}
+      screenOptions={{ headerShown: false }}
     >
       <Tab.Screen
         name="Home"
@@ -178,6 +194,12 @@ export default function AppNavigator() {
   // teacher isn't dropped back to the login screen every relaunch. Gated behind
   // `isBootstrapping` so we never flash the Login screen while this resolves.
   const [isBootstrapping, setIsBootstrapping] = useState(true);
+  // Tracked separately from `isBootstrapping` so the splash owns its own exit:
+  // it stays up for its minimum duration and plays a fade even when the session
+  // restore resolves almost immediately.
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const handleSplashHidden = useCallback(() => setIsSplashVisible(false), []);
+
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -204,16 +226,12 @@ export default function AppNavigator() {
     };
   }, [dispatch]);
 
-  if (isBootstrapping) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.primary} size="large" />
-      </View>
-    );
+  if (isSplashVisible) {
+    return <BrandSplash ready={!isBootstrapping} onHidden={handleSplashHidden} />;
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           <>
@@ -238,22 +256,15 @@ export default function AppNavigator() {
               getComponent={() =>
                 require('../modules/studentAttendance/screens/StudentFaceEnrollmentScreen').default
               }
-              options={{ headerShown: true, title: 'Student Face Enrollment' }}
             />
             <Stack.Screen name="StudentMarks" component={StudentMarksScreen} />
             <Stack.Screen name="ClassDiary" component={ClassDiaryScreen} />
-            <Stack.Screen
-              name="Announcements"
-              component={AnnouncementScreen}
-              options={{ headerShown: true, title: 'Announcements' }}
-            />
-            {isAdmin && (
-              <Stack.Screen
-                name="AdminDashboard"
-                component={AdminDashboardScreen}
-                options={{ headerShown: true, title: 'Admin Dashboard' }}
-              />
-            )}
+            {/* Announcements and the admin dashboard now render their own
+                `ScreenHeader` like every other pushed screen, so the native
+                stack header is hidden here too — previously these two were the
+                only screens in the app showing platform chrome. */}
+            <Stack.Screen name="Announcements" component={AnnouncementScreen} />
+            {isAdmin && <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />}
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

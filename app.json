@@ -33,6 +33,20 @@
     },
     "plugins": [
       [
+        "expo-splash-screen",
+        {
+          "//": "Native splash, shown from app launch until the JS bundle renders its first frame. backgroundColor is indigo-900 and the image is the KVS emblem, which is exactly what `BrandSplash` then draws at the same size and position — so the handoff to JS is invisible and the only visible change is the emblem starting to animate. imageWidth is 180dp rather than a token icon size because the emblem carries Devanagari text that is unreadable below roughly 160dp. assets/kvs-logo.png is regenerated from the SVG by scripts/rasterize-logo.js.",
+          "backgroundColor": "#312E81",
+          "image": "./assets/kvs-logo.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#312E81",
+            "image": "./assets/kvs-logo.png"
+          }
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {

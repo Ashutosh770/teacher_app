@@ -15,7 +15,7 @@
  * Requirements: 5.2
  */
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import {
@@ -35,12 +35,23 @@ import {
   type FaceFrameMetrics,
   type LivenessState,
 } from '../../../shared/services/liveness';
-import { colors, spacing, typography, borderRadius, withAlpha } from '../../../shared/theme';
+import {
+  borderRadius,
+  colors,
+  gradients,
+  motion,
+  shadows,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import { Button, Card, EmptyState, ProgressBar } from '../../../shared/components';
 import { attendanceConfig } from '../../../shared/config/attendanceConfig';
 import { staffAttendanceService } from '../services/staffAttendanceService';
 import { faceCaptureService, FACE_PHOTO_RESOLUTION } from '../../../shared/services/faceCapture';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
 import type { StaffFlowState } from '../state/staffAttendanceSlice';
+import StepHeader from './StepHeader';
 
 /**
  * Seams for task 10.2. Optional so the router can render the face step today;
@@ -73,8 +84,18 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1100,
+          easing: motion.easing.standard,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1100,
+          easing: motion.easing.standard,
+          useNativeDriver: true,
+        }),
       ])
     );
     loop.start();
@@ -233,33 +254,41 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
   if (flowState === 'camera_denied') {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Camera access needed</Text>
-        <Text style={styles.subtitle}>
-          Camera access is required to verify your identity. Grant access to continue, or mark your
-          attendance manually.
-        </Text>
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+        <EmptyState
+          icon="camera-off"
+          tone="error"
+          title="Camera access needed"
+          message="Camera access is required to verify your identity. Grant access to continue, or mark your attendance manually."
+        />
+
+        {errorMessage ? (
+          <Card
+            elevation="none"
+            padding="sm"
+            backgroundColor={colors.errorSoft}
+            style={styles.errorBanner}
+          >
+            <View style={styles.bannerRow}>
+              <Feather name="alert-circle" size={16} color={colors.errorText} />
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          </Card>
+        ) : null}
 
         <View style={styles.controls}>
           {/* DENIED (not blocked): retry the permission request. Hidden when the
               permission is undetermined or granted. */}
           {cameraPermission === 'denied' ? (
-            <TouchableOpacity style={styles.button} onPress={onRetryPermission}>
-              <Text style={styles.buttonText}>Retry</Text>
-            </TouchableOpacity>
+            <Button label="Retry" icon="refresh-cw" size="lg" onPress={onRetryPermission} />
           ) : null}
 
           {/* BLOCKED: open the OS settings screen. */}
           {cameraPermission === 'blocked' ? (
-            <TouchableOpacity style={styles.button} onPress={onOpenSettings}>
-              <Text style={styles.buttonText}>Open settings</Text>
-            </TouchableOpacity>
+            <Button label="Open settings" icon="settings" size="lg" onPress={onOpenSettings} />
           ) : null}
 
           {/* Manual fallback is always available when the camera cannot be used. */}
-          <TouchableOpacity style={styles.secondaryButton} onPress={onManualFallback}>
-            <Text style={styles.secondaryButtonText}>Mark manually</Text>
-          </TouchableOpacity>
+          <Button label="Mark manually" variant="outline" size="lg" onPress={onManualFallback} />
         </View>
       </View>
     );
@@ -271,36 +300,79 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
   if (isConfirm) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Confirm attendance</Text>
-        <View style={[styles.banner, styles.bannerSuccess]}>
-          <Text style={styles.bannerText}>
-            {lastConfidence !== null
-              ? `Face verified (${Math.round(lastConfidence)}% match). Submit to record your attendance.`
-              : 'Ready to submit your attendance.'}
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
-          onPress={onSubmit}
-          disabled={isSubmitting}
+        <StepHeader
+          step={2}
+          totalSteps={2}
+          icon="user-check"
+          title="Confirm attendance"
+          tone={colors.success}
+        />
+
+        <Card
+          elevation="sm"
+          padding="lg"
+          backgroundColor={colors.successSoft}
+          style={styles.confirmCard}
         >
-          {isSubmitting ? (
-            <ActivityIndicator color={colors.surface} />
-          ) : (
-            <Text style={styles.primaryButtonText}>Submit attendance</Text>
-          )}
-        </TouchableOpacity>
+          <View style={styles.confirmRow}>
+            <View style={styles.confirmIcon}>
+              <Feather name="check" size={26} color={colors.textInverse} />
+            </View>
+            <View style={styles.confirmText}>
+              <Text style={styles.confirmTitle}>
+                {lastConfidence !== null ? 'Face verified' : 'Ready to submit'}
+              </Text>
+              <Text style={styles.confirmBody}>
+                {lastConfidence !== null
+                  ? 'Submit to record your attendance for today.'
+                  : 'Submit to record your attendance for today.'}
+              </Text>
+            </View>
+          </View>
+
+          {lastConfidence !== null ? (
+            <View style={styles.confidenceBlock}>
+              <View style={styles.confidenceHeader}>
+                <Text style={styles.confidenceLabel}>Match confidence</Text>
+                <Text style={styles.confidenceValue}>{Math.round(lastConfidence)}%</Text>
+              </View>
+              <ProgressBar
+                progress={lastConfidence / 100}
+                colors={gradients.success}
+                trackColor={withAlpha(colors.success, 0.18)}
+                height={7}
+                label="Face match confidence"
+              />
+            </View>
+          ) : null}
+        </Card>
+
+        <Button
+          label="Submit attendance"
+          icon="send"
+          size="lg"
+          loading={isSubmitting}
+          disabled={isSubmitting}
+          tone={{ gradient: gradients.success }}
+          onPress={onSubmit}
+        />
       </View>
     );
   }
 
+  const checksDone = [liveness.faceDetected, liveness.blinkDetected, liveness.poseOk].filter(
+    Boolean,
+  ).length;
+
   return (
     <View style={styles.container}>
-      <Text style={styles.stepLabel}>Step 2</Text>
-      <Text style={styles.title}>Face Verification</Text>
-      <Text style={styles.subtitle}>
-        Center your face in the oval and hold still while we verify you.
-      </Text>
+      <StepHeader
+        step={2}
+        totalSteps={2}
+        icon="user-check"
+        title="Face verification"
+        subtitle="Centre your face in the oval and hold still while we verify you."
+      />
 
       {/* Camera capture panel — live preview when a front camera is available
           (device/dev-client dependent), otherwise the decorative fallback. */}
@@ -317,83 +389,122 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
             frameProcessor={frameProcessor}
           />
         ) : (
-          <LinearGradient colors={['#2D3748', '#1A202C']} style={StyleSheet.absoluteFill} />
+          <LinearGradient colors={gradients.camera} style={StyleSheet.absoluteFill} />
         )}
 
+        {/* Scrims so the white pills stay legible against any background. */}
+        <LinearGradient
+          colors={[withAlpha(colors.overlayDark, 0.6), 'transparent']}
+          style={styles.scrimTop}
+          pointerEvents="none"
+        />
+        <LinearGradient
+          colors={['transparent', withAlpha(colors.overlayDark, 0.6)]}
+          style={styles.scrimBottom}
+          pointerEvents="none"
+        />
+
         <View style={styles.cameraCenter} pointerEvents="none">
+          {/* The oval turns green the moment every liveness check passes, so the
+              readiness signal lands where the user is already looking rather
+              than only in the checklist below. */}
           <Animated.View
             style={[
               styles.ovalGuide,
-              { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0.3] }) },
+              canCapture && styles.ovalGuideReady,
+              {
+                opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0.45] }),
+                transform: [
+                  { scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.02] }) },
+                ],
+              },
             ]}
           />
           {isPending ? (
-            <ActivityIndicator color={colors.surface} style={styles.cameraSpinner} />
+            <ActivityIndicator color={colors.surface} size="large" />
           ) : !device ? (
-            <Feather name="camera" size={36} color="rgba(255,255,255,0.3)" style={styles.cameraSpinner} />
+            <Feather name="camera" size={36} color={withAlpha(colors.overlayLight, 0.3)} />
           ) : null}
         </View>
 
-        <View style={styles.cameraTopPill}>
+        <View style={styles.cameraTopPill} pointerEvents="none">
           <View style={styles.glassPill}>
+            <Feather name="user" size={14} color={colors.text} />
             <Text style={styles.glassPillText}>Position your face in the oval</Text>
           </View>
         </View>
 
         {!liveness.blinkDetected && liveness.faceDetected ? (
-          <View style={styles.cameraBottomPill}>
+          <View style={styles.cameraBottomPill} pointerEvents="none">
             <View style={[styles.glassPill, styles.glassPillWarning]}>
-              <Feather name="eye" size={16} color={colors.surface} />
+              <Feather name="eye" size={15} color={colors.textInverse} />
               <Text style={[styles.glassPillText, styles.glassPillTextOnWarning]}>Please blink…</Text>
             </View>
           </View>
         ) : null}
 
-        <View style={[styles.cornerGuide, styles.cornerTL]} />
-        <View style={[styles.cornerGuide, styles.cornerTR]} />
-        <View style={[styles.cornerGuide, styles.cornerBL]} />
-        <View style={[styles.cornerGuide, styles.cornerBR]} />
+        <View style={[styles.cornerGuide, styles.cornerTL]} pointerEvents="none" />
+        <View style={[styles.cornerGuide, styles.cornerTR]} pointerEvents="none" />
+        <View style={[styles.cornerGuide, styles.cornerBL]} pointerEvents="none" />
+        <View style={[styles.cornerGuide, styles.cornerBR]} pointerEvents="none" />
       </View>
 
       {/* Live liveness checklist. */}
-      <View style={styles.statusStack}>
-        <LivenessRow label="Face detected" done={liveness.faceDetected} />
-        <LivenessRow label="Blink detected" done={liveness.blinkDetected} />
-        <LivenessRow label="Pose OK" done={liveness.poseOk} />
-      </View>
+      <Card elevation="sm" padding="md" style={styles.checklistCard}>
+        <View style={styles.checklistHeader}>
+          <Text style={styles.checklistTitle}>Liveness checks</Text>
+          <Text style={[styles.checklistCount, canCapture && { color: colors.successText }]}>
+            {checksDone}/3
+          </Text>
+        </View>
 
-      {/* Attempt counter. */}
-      <Text style={styles.attemptCounter}>
-        Attempt {currentAttempt} of {maxAttempts}
-      </Text>
+        <View style={styles.statusStack}>
+          <LivenessRow icon="user" label="Face detected" done={liveness.faceDetected} />
+          <LivenessRow icon="eye" label="Blink detected" done={liveness.blinkDetected} />
+          <LivenessRow icon="crosshair" label="Pose OK" done={liveness.poseOk} />
+        </View>
+
+        <View style={styles.attemptRow}>
+          <Text style={styles.attemptCounter}>
+            Attempt {currentAttempt} of {maxAttempts}
+          </Text>
+          <View style={styles.attemptDots}>
+            {Array.from({ length: maxAttempts }, (_, i) => (
+              <View
+                key={i}
+                style={[styles.attemptDot, i < currentAttempt - 1 && styles.attemptDotUsed]}
+              />
+            ))}
+          </View>
+        </View>
+      </Card>
 
       {flowState === 'attempt_failed' && lastConfidence !== null ? (
-        <Text style={styles.warnText}>
-          No match ({Math.round(lastConfidence)}%). Please try again.
-        </Text>
+        <Banner
+          tone="warning"
+          icon="alert-triangle"
+          text={`No match (${Math.round(lastConfidence)}%). Please try again.`}
+        />
       ) : null}
       {flowState === 'face_failed' ? (
-        <Text style={styles.warnText}>Maximum attempts reached. You can try again.</Text>
+        <Banner tone="warning" icon="alert-triangle" text="Maximum attempts reached. You can try again." />
       ) : null}
-      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+      {errorMessage ? <Banner tone="error" icon="alert-circle" text={errorMessage} /> : null}
 
       {/* Capture is gated on the checklist, which is what makes it a control
           rather than decoration. Without the blink requirement a printed photo
           passes the whole flow — it satisfies "face detected" and "pose OK"
           perfectly well. The gate is lifted on a retry so a user cannot be
           trapped by flaky detection with no way forward. */}
-      <TouchableOpacity
-        style={[
-          styles.primaryButton,
-          (isPending || !canCapture) && styles.buttonDisabled,
-        ]}
-        onPress={onCapture}
+      <Button
+        label={isMatching ? 'Verifying…' : isRetry ? 'Try again' : 'Capture'}
+        icon={isRetry ? 'refresh-cw' : 'camera'}
+        size="lg"
+        loading={isMatching}
         disabled={isPending || !canCapture}
-      >
-        <Text style={styles.primaryButtonText}>
-          {isMatching ? 'Verifying…' : isRetry ? 'Try again' : 'Capture'}
-        </Text>
-      </TouchableOpacity>
+        tone={{ gradient: canCapture ? gradients.success : gradients.brandFlat }}
+        onPress={onCapture}
+      />
 
       {!canCapture && !isPending && !isRetry ? (
         <Text style={styles.hintText}>
@@ -404,22 +515,62 @@ export default function FaceStep(props: FaceStepProps): React.ReactElement {
               : 'Blink once to confirm you are present'}
         </Text>
       ) : null}
-
     </View>
   );
 }
 
-function LivenessRow({ label, done }: { label: string; done: boolean }) {
-  const tone = done ? colors.success : colors.warning;
+function LivenessRow({
+  icon,
+  label,
+  done,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  done: boolean;
+}) {
+  const fill = done ? colors.success : colors.warning;
+  const text = done ? colors.successText : colors.warningText;
+
   return (
-    <View style={[styles.statusRow, { backgroundColor: withAlpha(tone, 0.1) }]}>
-      {done ? (
-        <Feather name="check-circle" size={18} color={tone} />
-      ) : (
-        <View style={[styles.pendingDot, { borderColor: tone }]} />
-      )}
-      <Text style={[styles.statusLabel, { marginLeft: spacing.sm }]}>{label}</Text>
+    <View
+      style={[
+        styles.statusRow,
+        { backgroundColor: withAlpha(fill, 0.08), borderColor: withAlpha(fill, 0.2) },
+      ]}
+    >
+      <View style={[styles.statusIcon, { backgroundColor: withAlpha(fill, 0.14) }]}>
+        <Feather name={done ? 'check' : icon} size={14} color={text} />
+      </View>
+      <Text style={styles.statusLabel}>{label}</Text>
+      <Text style={[styles.statusState, { color: text }]}>{done ? 'OK' : 'Waiting'}</Text>
     </View>
+  );
+}
+
+function Banner({
+  tone,
+  icon,
+  text,
+}: {
+  tone: 'warning' | 'error';
+  icon: keyof typeof Feather.glyphMap;
+  text: string;
+}) {
+  const fill = tone === 'warning' ? colors.warning : colors.error;
+  const textColor = tone === 'warning' ? colors.warningText : colors.errorText;
+
+  return (
+    <Card
+      elevation="none"
+      padding="sm"
+      backgroundColor={withAlpha(fill, 0.08)}
+      style={[styles.errorBanner, { borderColor: withAlpha(fill, 0.25) }]}
+    >
+      <View style={styles.bannerRow}>
+        <Feather name={icon} size={16} color={textColor} />
+        <Text style={[styles.errorText, { color: textColor }]}>{text}</Text>
+      </View>
+    </Card>
   );
 }
 
@@ -427,29 +578,28 @@ const styles = StyleSheet.create({
   container: {
     padding: spacing.lg,
   },
-  stepLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.xs,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.primary,
-    marginBottom: spacing.xs,
-    textAlign: 'center',
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-    textAlign: 'center',
-  },
+
+  /* Camera panel */
   cameraPanel: {
     aspectRatio: 3 / 4,
     borderRadius: borderRadius.xl,
     overflow: 'hidden',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
+    backgroundColor: colors.cameraBackdrop,
+  },
+  scrimTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 110,
+  },
+  scrimBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 130,
   },
   cameraCenter: {
     position: 'absolute',
@@ -462,163 +612,239 @@ const styles = StyleSheet.create({
   },
   ovalGuide: {
     position: 'absolute',
-    width: 190,
-    height: 240,
+    width: 200,
+    height: 252,
     borderRadius: 130,
     borderWidth: 4,
-    borderColor: 'rgba(255,255,255,0.4)',
+    borderColor: withAlpha(colors.overlayLight, 0.55),
   },
-  cameraSpinner: {
-    opacity: 0.6,
+  ovalGuideReady: {
+    borderColor: colors.success,
+    borderWidth: 5,
   },
   cameraTopPill: {
     position: 'absolute',
-    top: spacing.lg,
-    left: 0,
-    right: 0,
+    top: spacing.md,
+    left: spacing.md,
+    right: spacing.md,
     alignItems: 'center',
   },
   cameraBottomPill: {
     position: 'absolute',
-    bottom: spacing.lg,
-    left: 0,
-    right: 0,
+    bottom: spacing.md,
+    left: spacing.md,
+    right: spacing.md,
     alignItems: 'center',
   },
   glassPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: withAlpha('#FFFFFF', 0.95),
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + spacing.xs,
+    gap: spacing.xs + 2,
+    backgroundColor: withAlpha(colors.overlayLight, 0.96),
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
     borderRadius: borderRadius.full,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
+    ...shadows.sm,
   },
   glassPillWarning: {
-    backgroundColor: withAlpha(colors.warning, 0.95),
+    backgroundColor: colors.warning,
   },
   glassPillText: {
-    ...typography.bodyBold,
-    color: colors.primary,
+    ...typography.captionBold,
+    color: colors.text,
   },
   glassPillTextOnWarning: {
-    color: colors.surface,
+    color: colors.textInverse,
   },
   cornerGuide: {
     position: 'absolute',
-    width: 28,
-    height: 28,
-    borderColor: colors.surface,
+    width: 30,
+    height: 30,
+    borderColor: withAlpha(colors.overlayLight, 0.85),
   },
-  cornerTL: { top: spacing.md, left: spacing.md, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: borderRadius.md },
-  cornerTR: { top: spacing.md, right: spacing.md, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: borderRadius.md },
-  cornerBL: { bottom: spacing.md, left: spacing.md, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: borderRadius.md },
-  cornerBR: { bottom: spacing.md, right: spacing.md, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: borderRadius.md },
+  cornerTL: {
+    top: spacing.smd,
+    left: spacing.smd,
+    borderTopWidth: 3,
+    borderLeftWidth: 3,
+    borderTopLeftRadius: borderRadius.md,
+  },
+  cornerTR: {
+    top: spacing.smd,
+    right: spacing.smd,
+    borderTopWidth: 3,
+    borderRightWidth: 3,
+    borderTopRightRadius: borderRadius.md,
+  },
+  cornerBL: {
+    bottom: spacing.smd,
+    left: spacing.smd,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderBottomLeftRadius: borderRadius.md,
+  },
+  cornerBR: {
+    bottom: spacing.smd,
+    right: spacing.smd,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+    borderBottomRightRadius: borderRadius.md,
+  },
+
+  /* Liveness checklist */
+  checklistCard: {
+    marginBottom: spacing.md,
+  },
+  checklistHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.smd,
+  },
+  checklistTitle: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
+  checklistCount: {
+    ...typography.captionBold,
+    color: colors.textSecondary,
+  },
   statusStack: {
     gap: spacing.sm,
-    marginBottom: spacing.md,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
-    borderRadius: borderRadius.lg,
+    gap: spacing.smd,
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+  },
+  statusIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: borderRadius.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statusLabel: {
-    ...typography.body,
-    fontWeight: '600',
+    ...typography.caption,
     color: colors.text,
+    flex: 1,
   },
-  pendingDot: {
-    width: 18,
-    height: 18,
-    borderRadius: borderRadius.full,
-    borderWidth: 2,
+  statusState: {
+    ...typography.micro,
+    fontWeight: '700',
+  },
+
+  /* Attempts */
+  attemptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.smd,
+    paddingTop: spacing.smd,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   attemptCounter: {
-    ...typography.caption,
+    ...typography.small,
     color: colors.textSecondary,
-    marginBottom: spacing.md,
   },
-  warnText: {
+  attemptDots: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  attemptDot: {
+    width: 7,
+    height: 7,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.border,
+  },
+  attemptDotUsed: {
+    backgroundColor: colors.warning,
+  },
+
+  /* Confirm */
+  confirmCard: {
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: withAlpha(colors.success, 0.25),
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  confirmIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmText: {
+    flex: 1,
+  },
+  confirmTitle: {
+    ...typography.h3,
+    color: colors.successText,
+  },
+  confirmBody: {
     ...typography.caption,
-    color: colors.warning,
+    color: colors.text,
+    marginTop: spacing.xxs,
+  },
+  confidenceBlock: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: withAlpha(colors.success, 0.3),
+  },
+  confidenceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
+  confidenceLabel: {
+    ...typography.small,
+    color: colors.text,
+  },
+  confidenceValue: {
+    ...typography.captionBold,
+    color: colors.successText,
+  },
+
+  /* Banners */
+  errorBanner: {
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: withAlpha(colors.error, 0.25),
+  },
+  bannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  errorText: {
+    ...typography.caption,
+    color: colors.errorText,
+    flex: 1,
+  },
+
   // Tells the user which check is still outstanding. Without it a disabled
   // Capture button reads as the app being broken rather than as waiting.
   hintText: {
     ...typography.caption,
     color: colors.textSecondary,
     textAlign: 'center',
-    marginTop: spacing.sm,
+    marginTop: spacing.smd,
   },
-  errorText: {
-    ...typography.caption,
-    color: colors.error,
-    marginBottom: spacing.sm,
-  },
-  banner: {
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  bannerSuccess: {
-    backgroundColor: withAlpha(colors.success, 0.1),
-    borderWidth: 1,
-    borderColor: colors.success,
-  },
-  bannerText: {
-    ...typography.body,
-    color: colors.text,
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    backgroundColor: colors.secondary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    color: colors.surface,
-    ...typography.body,
-    fontWeight: '700',
-  },
-  button: {
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: colors.disabled,
-  },
-  buttonText: {
-    color: '#fff',
-    ...typography.body,
-    fontWeight: '600',
-  },
+
   controls: {
-    gap: spacing.sm,
-  },
-  secondaryButton: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  secondaryButtonText: {
-    color: colors.primary,
-    ...typography.body,
-    fontWeight: '600',
+    gap: spacing.smd,
   },
 });

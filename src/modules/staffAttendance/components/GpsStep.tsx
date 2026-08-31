@@ -1,33 +1,36 @@
 /**
- * GPS / geo-fence step of the staff attendance flow (task 10.1).
+ * GPS / geo-fence step of the staff attendance flow.
  *
  * Presentational step driven by the `staffAttendance` slice: renders a location
  * card and three status rows (distance / accuracy / mock) from `gps.result`, a
  * "Verify Location" action that drives `staffAttendanceService.requestLocation()`,
- * and reflects the acquiring / error / verified sub-states of the flow.
+ * and reflects the acquiring / error / verified sub-states of the flow, plus the
+ * permission/error recovery controls (retry, open-settings, manual fallback).
  *
- * The detailed permission/error recovery controls (retry, open-settings, manual
- * fallback) are intentionally NOT wired here — that is task 10.2. Optional
- * callback props are declared as seams so 10.2 can attach those controls without
- * restructuring this component.
- *
- * Requirements: 2.5, 3.2
+ * Requirements: 1.3, 1.4, 1.6, 2.5, 2.6, 3.2, 3.3, 17.1
  */
 import React, { useCallback, useEffect, useRef } from 'react';
-import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useAppSelector } from '../../../store';
-import { colors, spacing, typography, borderRadius, withAlpha } from '../../../shared/theme';
+import {
+  borderRadius,
+  colors,
+  gradients,
+  motion,
+  shadows,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import { Button, Card } from '../../../shared/components';
 import { attendanceConfig } from '../../../shared/config/attendanceConfig';
 import { staffAttendanceService } from '../services/staffAttendanceService';
 import { locationPermissionManager } from '../../../shared/services/permissions';
 import type { StaffFlowState } from '../state/staffAttendanceSlice';
+import StepHeader from './StepHeader';
 
-/**
- * Seams for task 10.2. These are optional so the router can render the GPS step
- * today; 10.2 will supply the permission/error recovery handlers.
- */
 export interface GpsStepProps {
   /** Retry GPS acquisition without re-requesting permission (Req 17.1). */
   onRetryLocation?: () => void;
@@ -42,7 +45,8 @@ export interface GpsStepProps {
 /** Semantic tone used to colour a status row's value. */
 type Tone = 'good' | 'pending' | 'bad';
 
-function toneColor(tone: Tone): string {
+/** Fill colour — safe for icons, rings and bars. */
+function toneFill(tone: Tone): string {
   switch (tone) {
     case 'good':
       return colors.success;
@@ -51,6 +55,22 @@ function toneColor(tone: Tone): string {
     case 'bad':
     default:
       return colors.error;
+  }
+}
+
+/**
+ * Text colour. Distinct from the fill above: these values render at 15px on a
+ * light tint, where the fill steps sit at ~2:1.
+ */
+function toneText(tone: Tone): string {
+  switch (tone) {
+    case 'good':
+      return colors.successText;
+    case 'pending':
+      return colors.warningText;
+    case 'bad':
+    default:
+      return colors.errorText;
   }
 }
 
@@ -73,10 +93,10 @@ const GPS_ERROR_STATES: ReadonlySet<StaffFlowState> = new Set<StaffFlowState>([
 ]);
 
 export default function GpsStep(props: GpsStepProps): React.ReactElement {
-  const flowState = useAppSelector((s) => s.staffAttendance.flowState);
-  const result = useAppSelector((s) => s.staffAttendance.gps.result);
-  const errorMessage = useAppSelector((s) => s.staffAttendance.error);
-  const locationPermission = useAppSelector((s) => s.staffAttendance.locationPermission);
+  const flowState = useAppSelector(s => s.staffAttendance.flowState);
+  const result = useAppSelector(s => s.staffAttendance.gps.result);
+  const errorMessage = useAppSelector(s => s.staffAttendance.error);
+  const locationPermission = useAppSelector(s => s.staffAttendance.locationPermission);
 
   const isAcquiring = ACQUIRING_STATES.has(flowState);
   const isVerified = flowState === 'location_verified';
@@ -148,30 +168,48 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1600,
+          easing: motion.easing.decelerate,
+          useNativeDriver: true,
+        }),
         Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
+      ]),
     );
     loop.start();
     return () => loop.stop();
   }, [pulse]);
-  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
-  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] });
+
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.1] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
 
   return (
     <View style={styles.container}>
-      <Text style={styles.stepLabel}>Step 1</Text>
-      <Text style={styles.title}>Location Verification</Text>
-      <Text style={styles.subtitle}>
-        We check that you are within the school geo-fence before face verification.
-      </Text>
+      <StepHeader
+        step={1}
+        totalSteps={2}
+        icon="map-pin"
+        title="Location verification"
+        subtitle="We check that you are within the school geo-fence before face verification."
+      />
 
       {/* Map / location visual. */}
       <View style={styles.mapCard}>
-        <LinearGradient colors={['#EFF6FF', '#ECFDF5']} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={gradients.calm} style={StyleSheet.absoluteFill} />
+        {/* A faint grid reads as "map" without shipping tiles or a map SDK. */}
+        <View style={styles.grid} pointerEvents="none">
+          {Array.from({ length: 5 }, (_, i) => (
+            <View key={`h${i}`} style={[styles.gridLine, { top: `${(i + 1) * 16}%` }]} />
+          ))}
+          {Array.from({ length: 5 }, (_, i) => (
+            <View key={`v${i}`} style={[styles.gridLineV, { left: `${(i + 1) * 16}%` }]} />
+          ))}
+        </View>
+
         {isAcquiring ? (
           <View style={styles.mapCenter}>
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.primary} size="large" />
             <Text style={styles.mapCaption}>Acquiring GPS…</Text>
           </View>
         ) : (
@@ -180,23 +218,27 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
               <Animated.View
                 style={[
                   styles.pulseRing,
-                  { backgroundColor: withAlpha(toneColor(distanceTone), 0.25) },
+                  { backgroundColor: withAlpha(toneFill(distanceTone), 0.22) },
                   { opacity: ringOpacity, transform: [{ scale: ringScale }] },
                 ]}
               />
-              <View style={[styles.mapPinWrap, { backgroundColor: colors.primary }]}>
-                <Feather name="map-pin" size={22} color={colors.surface} />
+              <View style={styles.fenceRing} />
+              <View style={styles.mapPinWrap}>
+                <Feather name="home" size={22} color={colors.textInverse} />
               </View>
             </View>
+
             {result ? (
               <View style={styles.youAreHereDot}>
                 <View style={styles.youAreHereCore} />
               </View>
             ) : null}
+
             <View style={styles.distancePillWrap}>
               <View style={styles.distancePill}>
-                <Text style={[styles.distancePillText, { color: toneColor(distanceTone) }]}>
-                  {result ? `${Math.round(result.distanceMeters)} meters` : 'Locating…'}
+                <Feather name="navigation" size={13} color={toneText(distanceTone)} />
+                <Text style={[styles.distancePillText, { color: toneText(distanceTone) }]}>
+                  {result ? `${Math.round(result.distanceMeters)} m from school` : 'Locating…'}
                 </Text>
               </View>
             </View>
@@ -207,6 +249,7 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
       {/* Three tinted status rows: distance, accuracy, mock. */}
       <View style={styles.statusStack}>
         <StatusRow
+          icon="navigation"
           label="Distance from school"
           value={
             result ? `${Math.round(result.distanceMeters)} m / ${Math.round(result.radiusMeters)} m` : '—'
@@ -214,76 +257,108 @@ export default function GpsStep(props: GpsStepProps): React.ReactElement {
           tone={distanceTone}
         />
         <StatusRow
-          label="GPS Accuracy"
+          icon="target"
+          label="GPS accuracy"
           value={result ? `±${Math.round(result.accuracyMeters)} m` : '—'}
           tone={accuracyTone}
         />
         <StatusRow
-          label="Mock Location"
-          value={result ? (result.status === 'mock_detected' ? 'Detected' : 'Not Detected') : '—'}
+          icon="shield"
+          label="Mock location"
+          value={result ? (result.status === 'mock_detected' ? 'Detected' : 'Not detected') : '—'}
           tone={mockTone}
         />
       </View>
 
-      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+      {errorMessage ? (
+        <Card
+          elevation="none"
+          padding="sm"
+          backgroundColor={colors.errorSoft}
+          style={styles.errorBanner}
+        >
+          <View style={styles.errorRow}>
+            <Feather name="alert-circle" size={16} color={colors.errorText} />
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          </View>
+        </Card>
+      ) : null}
 
       {isVerified ? (
-        <TouchableOpacity style={styles.primaryButton} onPress={onContinue}>
-          <Feather name="check-circle" size={18} color={colors.surface} />
-          <Text style={styles.primaryButtonText}>Continue to face verification</Text>
-        </TouchableOpacity>
+        <Button
+          label="Continue to face verification"
+          icon="check-circle"
+          iconRight="arrow-right"
+          size="lg"
+          tone={{ gradient: gradients.success }}
+          onPress={onContinue}
+        />
       ) : isRecovery ? (
-        /* Permission/error recovery + manual fallback controls (task 10.2),
-           rendered per flowState + permission state with exact visibility rules. */
+        /* Permission/error recovery + manual fallback controls, rendered per
+           flowState + permission state with exact visibility rules. */
         <View style={styles.controls}>
           {/* Location DENIED (not blocked): retry the permission request (Req 1.3).
               Hidden when permission is undetermined, granted, or blocked. */}
           {isDenied && locationPermission === 'denied' ? (
-            <TouchableOpacity style={styles.button} onPress={onRetryPermission}>
-              <Text style={styles.buttonText}>Retry permission</Text>
-            </TouchableOpacity>
+            <Button label="Retry permission" icon="refresh-cw" size="lg" onPress={onRetryPermission} />
           ) : null}
 
           {/* Location BLOCKED: open the OS settings screen (Req 1.4). */}
           {isDenied && locationPermission === 'blocked' ? (
-            <TouchableOpacity style={styles.button} onPress={onOpenSettings}>
-              <Text style={styles.buttonText}>Open settings</Text>
-            </TouchableOpacity>
+            <Button label="Open settings" icon="settings" size="lg" onPress={onOpenSettings} />
           ) : null}
 
           {/* GPS error / unreliable / out-of-fence / mock: retry GPS (Req 17.1). */}
           {isGpsError ? (
-            <TouchableOpacity style={styles.button} onPress={onRetryLocation}>
-              <Text style={styles.buttonText}>Retry</Text>
-            </TouchableOpacity>
+            <Button label="Retry" icon="refresh-cw" size="lg" onPress={onRetryLocation} />
           ) : null}
 
           {/* Manual fallback: shown in manual_fallback (accuracy retries exhausted)
               or once the overall GPS timeout has elapsed (Req 1.6/3.3). */}
           {isManualFallback || (isGpsError && canFallBack) ? (
-            <TouchableOpacity style={styles.secondaryButton} onPress={onManualFallback}>
-              <Text style={styles.secondaryButtonText}>Mark manually</Text>
-            </TouchableOpacity>
+            <Button label="Mark manually" variant="outline" size="lg" onPress={onManualFallback} />
           ) : null}
         </View>
       ) : (
-        <TouchableOpacity
-          style={[styles.primaryButton, isAcquiring && styles.buttonDisabled]}
-          onPress={onVerifyLocation}
+        <Button
+          label={isAcquiring ? 'Verifying…' : 'Verify location'}
+          icon="crosshair"
+          size="lg"
+          loading={isAcquiring}
           disabled={isAcquiring}
-        >
-          <Text style={styles.primaryButtonText}>Verify Location</Text>
-        </TouchableOpacity>
+          onPress={onVerifyLocation}
+        />
       )}
     </View>
   );
 }
 
-function StatusRow({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+function StatusRow({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  value: string;
+  tone: Tone;
+}) {
+  const fill = toneFill(tone);
+  const text = toneText(tone);
+
   return (
-    <View style={[styles.statusRow, { backgroundColor: withAlpha(toneColor(tone), 0.1) }]}>
+    <View
+      style={[
+        styles.statusRow,
+        { backgroundColor: withAlpha(fill, 0.08), borderColor: withAlpha(fill, 0.2) },
+      ]}
+    >
+      <View style={[styles.statusIcon, { backgroundColor: withAlpha(fill, 0.14) }]}>
+        <Feather name={icon} size={15} color={text} />
+      </View>
       <Text style={styles.statusLabel}>{label}</Text>
-      <Text style={[styles.statusValue, { color: toneColor(tone) }]}>{value}</Text>
+      <Text style={[styles.statusValue, { color: text }]}>{value}</Text>
     </View>
   );
 }
@@ -292,29 +367,32 @@ const styles = StyleSheet.create({
   container: {
     padding: spacing.lg,
   },
-  stepLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.xs,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.primary,
-    marginBottom: spacing.xs,
-    textAlign: 'center',
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-    textAlign: 'center',
-  },
+
+  /* Map */
   mapCard: {
-    height: 220,
+    height: 230,
     borderRadius: borderRadius.xl,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  grid: {
+    ...StyleSheet.absoluteFill,
+  },
+  gridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: withAlpha(colors.primary, 0.09),
+  },
+  gridLineV: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: withAlpha(colors.primary, 0.09),
   },
   mapCenter: {
     flex: 1,
@@ -323,139 +401,122 @@ const styles = StyleSheet.create({
   },
   pulseRing: {
     position: 'absolute',
-    width: 120,
-    height: 120,
+    width: 110,
+    height: 110,
     borderRadius: borderRadius.full,
   },
-  mapPinWrap: {
-    width: 56,
-    height: 56,
+  fenceRing: {
+    position: 'absolute',
+    width: 132,
+    height: 132,
     borderRadius: borderRadius.full,
+    borderWidth: 2,
+    borderColor: withAlpha(colors.primary, 0.28),
+    backgroundColor: withAlpha(colors.primary, 0.05),
+  },
+  mapPinWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
+    ...shadows.md,
   },
   youAreHereDot: {
     position: 'absolute',
-    top: '42%',
-    left: '58%',
-    width: 20,
-    height: 20,
+    top: '40%',
+    left: '62%',
+    width: 22,
+    height: 22,
     borderRadius: borderRadius.full,
-    backgroundColor: colors.blue,
+    backgroundColor: colors.info,
     borderWidth: 3,
     borderColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 2,
+    ...shadows.sm,
   },
   youAreHereCore: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: borderRadius.full,
     backgroundColor: colors.surface,
   },
   distancePillWrap: {
     position: 'absolute',
-    bottom: spacing.md,
+    bottom: spacing.smd,
     left: 0,
     right: 0,
     alignItems: 'center',
   },
   distancePill: {
-    backgroundColor: withAlpha('#FFFFFF', 0.95),
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    backgroundColor: withAlpha(colors.overlayLight, 0.96),
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
     borderRadius: borderRadius.full,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
+    ...shadows.sm,
   },
   distancePillText: {
-    ...typography.bodyBold,
+    ...typography.captionBold,
   },
   mapCaption: {
     ...typography.caption,
     color: colors.textSecondary,
-    marginTop: spacing.sm,
+    marginTop: spacing.smd,
   },
+
+  /* Status rows */
   statusStack: {
     gap: spacing.sm,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.md,
-    borderRadius: borderRadius.lg,
-  },
-  statusLabel: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  statusValue: {
-    ...typography.body,
-    fontWeight: '700',
-  },
-  errorText: {
-    ...typography.caption,
-    color: colors.error,
-    marginBottom: spacing.md,
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    backgroundColor: colors.secondary,
-    padding: spacing.md,
+    gap: spacing.smd,
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.smd,
     borderRadius: borderRadius.md,
+    borderWidth: 1,
+  },
+  statusIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryButtonText: {
-    color: colors.surface,
-    ...typography.body,
-    fontWeight: '700',
+  statusLabel: {
+    ...typography.caption,
+    color: colors.text,
+    flex: 1,
   },
-  button: {
-    backgroundColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
+  statusValue: {
+    ...typography.captionBold,
+  },
+
+  /* Error */
+  errorBanner: {
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: withAlpha(colors.error, 0.25),
+  },
+  errorRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: colors.disabled,
-  },
-  buttonText: {
-    color: '#fff',
-    ...typography.body,
-    fontWeight: '600',
-  },
-  controls: {
     gap: spacing.sm,
   },
-  secondaryButton: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
+  errorText: {
+    ...typography.caption,
+    color: colors.errorText,
+    flex: 1,
   },
-  secondaryButtonText: {
-    color: colors.primary,
-    ...typography.body,
-    fontWeight: '600',
+
+  controls: {
+    gap: spacing.smd,
   },
 });

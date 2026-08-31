@@ -1,10 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
-import { GlassCard, StatusPill } from '../../../shared/components';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  borderRadius,
+  colors,
+  moduleAccent,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Pressable,
+  ScreenHeader,
+  StatTile,
+  StatusPill,
+} from '../../../shared/components';
 import { useAppSelector } from '../../../store';
 import {
   componentMax,
@@ -20,20 +35,26 @@ import type { ExamTypeCode, StudentMark } from '../../../shared/types';
 
 const CLASSES = ['X-A', 'X-B', 'IX-A'];
 const SUBJECTS = ['Mathematics', 'Science', 'English'];
+const ACCENT = moduleAccent.marks;
 
-const GRADE_TONE: Record<string, string> = {
-  A1: colors.secondary,
-  A2: colors.blue,
-  B1: colors.blue,
-  B2: colors.accent,
-  C1: colors.accent,
-  C2: colors.accent,
-  D: colors.error,
-  E: colors.error,
+/**
+ * Grade → colour. Uses the AA-safe `*Text` steps because these render as 13px
+ * badge labels; the fill steps sit near 2:1 at that size.
+ */
+const GRADE_TONE: Record<string, { text: string; fill: string }> = {
+  A1: { text: colors.successText, fill: colors.success },
+  A2: { text: colors.successText, fill: colors.success },
+  B1: { text: colors.infoText, fill: colors.info },
+  B2: { text: colors.infoText, fill: colors.info },
+  C1: { text: colors.warningText, fill: colors.warning },
+  C2: { text: colors.warningText, fill: colors.warning },
+  D: { text: colors.errorText, fill: colors.error },
+  E: { text: colors.errorText, fill: colors.error },
 };
 
 export default function StudentMarksScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [selectedClass, setSelectedClass] = useState(CLASSES[0]);
   const [selectedSubject, setSelectedSubject] = useState(SUBJECTS[0]);
   const [selectedExam, setSelectedExam] = useState<ExamTypeCode>('PT-1');
@@ -47,11 +68,11 @@ export default function StudentMarksScreen() {
 
   const currentExamConfig = EXAM_TYPES.find(e => e.code === selectedExam)!;
   const currentAssessment = assessments.find(
-    a => a.classId === selectedClass && a.subjectId === selectedSubject && a.type === selectedExam
+    a => a.classId === selectedClass && a.subjectId === selectedSubject && a.type === selectedExam,
   );
   const rows = useMemo(
     () => (currentAssessment ? marks.filter(m => m.assessmentId === currentAssessment.id) : []),
-    [marks, currentAssessment]
+    [marks, currentAssessment],
   );
   const max = componentMax(selectedExam);
 
@@ -68,122 +89,140 @@ export default function StudentMarksScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.header}>
-        <LinearGradient colors={[colors.primary, colors.primaryLight, colors.primary]} style={StyleSheet.absoluteFill} />
-        <View style={styles.headerOrb} />
-
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Feather name="arrow-left" size={22} color={colors.surface} />
-        </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>Enhanced Marks Entry</Text>
-        <Text style={styles.headerSubtitle}>All Examination Types</Text>
-
-        <View style={styles.dropdownRow}>
+      <ScreenHeader
+        title="Marks Entry"
+        subtitle="All examination types"
+        gradientColors={ACCENT.gradient}
+        onBack={() => navigation.goBack()}
+      >
+        <View style={styles.selectorRow}>
           <PillSelect value={selectedClass} options={CLASSES} onChange={setSelectedClass} prefix="Class " />
           <PillSelect value={selectedSubject} options={SUBJECTS} onChange={setSelectedSubject} />
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.examTabRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.examTabRow}
+        >
           {EXAM_TYPES.map(exam => {
             const active = exam.code === selectedExam;
             return (
-              <TouchableOpacity
+              <Pressable
                 key={exam.code}
                 onPress={() => setSelectedExam(exam.code)}
+                activeScale={0.94}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={exam.name}
                 style={[styles.examTab, active && styles.examTabActive]}
               >
-                <Text style={[styles.examTabText, active && styles.examTabTextActive]}>{exam.code}</Text>
-              </TouchableOpacity>
+                <Text style={[styles.examTabText, active && styles.examTabTextActive]}>
+                  {exam.code}
+                </Text>
+              </Pressable>
             );
           })}
         </ScrollView>
-      </View>
+      </ScreenHeader>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <GlassCard style={[styles.examInfoCard, { borderLeftColor: currentExamConfig.color }]}>
-          <View style={styles.examInfoTop}>
-            <Text style={styles.examInfoName}>{currentExamConfig.name}</Text>
-            <View style={[styles.maxBadge, { backgroundColor: withAlpha(colors.purple, 0.1) }]}>
-              <Text style={[styles.maxBadgeText, { color: colors.purple }]}>Max: {currentExamConfig.maxMarks}</Text>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Card elevation="sm" padding="md" style={styles.examInfoCard}>
+            <View style={[styles.examInfoRail, { backgroundColor: currentExamConfig.color }]} />
+            <View style={styles.examInfoTop}>
+              <Text style={styles.examInfoName} numberOfLines={1}>
+                {currentExamConfig.name}
+              </Text>
+              <View style={styles.maxBadge}>
+                <Text style={styles.maxBadgeText}>Max {currentExamConfig.maxMarks}</Text>
+              </View>
             </View>
-          </View>
-          <View style={styles.examInfoStatusRow}>
-            <Feather name="file-text" size={14} color={colors.textSecondary} />
-            <Text style={styles.examInfoStatusLabel}>Status:</Text>
-            <StatusPill label={isDraft ? 'Draft' : 'Submitted'} tone={isDraft ? 'warning' : 'success'} />
-          </View>
-        </GlassCard>
-
-        <GlassCard style={styles.tableCard}>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeaderCell, styles.studentCol]}>Student</Text>
-            <Text style={styles.tableHeaderCell}>Theory</Text>
-            <Text style={styles.tableHeaderCell}>Practical</Text>
-            <Text style={styles.tableHeaderCell}>Internal</Text>
-            <Text style={styles.tableHeaderCell}>Grade</Text>
-          </View>
-
-          {rows.length === 0 ? (
-            <Text style={styles.emptyText}>No students in this roster yet.</Text>
-          ) : (
-            rows.map((mark, index) => (
-              <MarkRow
-                key={mark.id}
-                mark={mark}
-                max={max}
-                maxScore={currentAssessment!.maxScore}
-                isLast={index === rows.length - 1}
+            <View style={styles.examInfoStatusRow}>
+              <Feather name="file-text" size={13} color={colors.textSecondary} />
+              <Text style={styles.examInfoStatusLabel}>Status</Text>
+              <StatusPill
+                label={isDraft ? 'Draft' : 'Submitted'}
+                tone={isDraft ? 'warning' : 'success'}
+                icon={isDraft ? 'edit-3' : 'check'}
               />
-            ))
-          )}
-        </GlassCard>
+            </View>
+          </Card>
 
-        <GlassCard style={styles.statsCard}>
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.secondary }]}>{completed}</Text>
-              <Text style={styles.statLabel}>Completed</Text>
+          <Card elevation="sm" padding="none" style={styles.tableCard}>
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeaderCell, styles.studentCol]}>Student</Text>
+              <Text style={styles.tableHeaderCell}>Thry</Text>
+              <Text style={styles.tableHeaderCell}>Prac</Text>
+              <Text style={styles.tableHeaderCell}>Int</Text>
+              <Text style={styles.tableHeaderCell}>Grade</Text>
             </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.accent }]}>{pending}</Text>
-              <Text style={styles.statLabel}>Pending</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statValue, { color: colors.primary }]}>{avgScore}%</Text>
-              <Text style={styles.statLabel}>Avg Score</Text>
-            </View>
-          </View>
-        </GlassCard>
-      </ScrollView>
 
-      <View style={styles.actionBar}>
-        <TouchableOpacity
-          style={styles.saveDraftButton}
-          onPress={() => currentAssessment && saveDraft(currentAssessment.id)}
-          disabled={!currentAssessment}
-        >
-          <Feather name="save" size={18} color={colors.primary} />
-          <Text style={styles.saveDraftButtonText}>Save Draft</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.submitButton}
-          onPress={() => currentAssessment && submitForReview(currentAssessment.id)}
-          disabled={!currentAssessment}
-        >
-          <Feather name="check-circle" size={18} color={colors.surface} />
-          <Text style={styles.submitButtonText}>Submit for Review</Text>
-        </TouchableOpacity>
-      </View>
+            {rows.length === 0 ? (
+              <EmptyState
+                icon="users"
+                tone="info"
+                title="No students"
+                message="This class and subject has no roster loaded yet."
+                compact
+              />
+            ) : (
+              rows.map((mark, index) => (
+                <MarkRow
+                  key={mark.id}
+                  mark={mark}
+                  max={max}
+                  maxScore={currentAssessment!.maxScore}
+                  isLast={index === rows.length - 1}
+                />
+              ))
+            )}
+          </Card>
+
+          <Card elevation="sm" padding="md">
+            <Text style={styles.statsTitle}>PROGRESS</Text>
+            <View style={styles.statsRow}>
+              <StatTile value={completed} label="Completed" tone={colors.successText} />
+              <View style={styles.statsDivider} />
+              <StatTile value={pending} label="Pending" tone={colors.warningText} />
+              <View style={styles.statsDivider} />
+              <StatTile value={`${avgScore}%`} label="Avg score" tone={ACCENT.text} />
+            </View>
+          </Card>
+        </ScrollView>
+
+        <View style={[styles.actionBar, { paddingBottom: insets.bottom + spacing.smd }]}>
+          <Button
+            label="Save draft"
+            icon="save"
+            variant="outline"
+            onPress={() => currentAssessment && saveDraft(currentAssessment.id)}
+            disabled={!currentAssessment}
+            tone={{ solid: ACCENT.solid }}
+            style={styles.actionButton}
+          />
+          <Button
+            label="Submit"
+            icon="check-circle"
+            onPress={() => currentAssessment && submitForReview(currentAssessment.id)}
+            disabled={!currentAssessment}
+            tone={{ gradient: ACCENT.gradient }}
+            style={styles.actionButton}
+          />
+        </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
+/** Cycles through its options on tap — there is no picker dependency in the app. */
 function PillSelect({
   value,
   options,
@@ -199,14 +238,21 @@ function PillSelect({
     const index = options.indexOf(value);
     onChange(options[(index + 1) % options.length]);
   };
+
   return (
-    <TouchableOpacity style={styles.dropdown} onPress={nextValue} accessibilityRole="button">
-      <Text style={styles.dropdownText} numberOfLines={1}>
+    <Pressable
+      onPress={nextValue}
+      activeScale={0.97}
+      accessibilityRole="button"
+      accessibilityLabel={`${prefix}${value}. Tap to change.`}
+      style={styles.selector}
+    >
+      <Text style={styles.selectorText} numberOfLines={1}>
         {prefix}
         {value}
       </Text>
-      <Feather name="chevron-down" size={16} color={colors.surface} />
-    </TouchableOpacity>
+      <Feather name="chevron-down" size={15} color={colors.textInverse} />
+    </Pressable>
   );
 }
 
@@ -222,16 +268,18 @@ function MarkRow({
   isLast: boolean;
 }) {
   const grade = gradeFor(mark, maxScore);
-  const gradeColor = GRADE_TONE[grade] ?? colors.disabled;
+  const tone = GRADE_TONE[grade] ?? { text: colors.textSecondary, fill: colors.textSecondary };
+  const isComplete = totalFor(mark) != null;
 
   return (
-    <View style={[styles.row, !isLast && styles.rowDivider]}>
+    <View style={[styles.row, !isLast && styles.rowDivider, isComplete && styles.rowComplete]}>
       <View style={styles.studentCol}>
         <Text style={styles.studentName} numberOfLines={1}>
           {mark.studentName}
         </Text>
-        <Text style={styles.studentRoll}>Roll: {mark.studentId.split('-').pop()}</Text>
+        <Text style={styles.studentRoll}>Roll {mark.studentId.split('-').pop()}</Text>
       </View>
+
       <MarkInput
         value={mark.theoryMark}
         max={max.theory}
@@ -247,9 +295,10 @@ function MarkRow({
         max={max.internal}
         onChangeValue={raw => updateMarkValue(mark.id, 'internalMark', raw, max.internal)}
       />
+
       <View style={styles.gradeCol}>
-        <View style={[styles.gradeBadge, { backgroundColor: withAlpha(gradeColor, 0.1) }]}>
-          <Text style={[styles.gradeBadgeText, { color: gradeColor }]}>{grade}</Text>
+        <View style={[styles.gradeBadge, { backgroundColor: withAlpha(tone.fill, 0.13) }]}>
+          <Text style={[styles.gradeBadgeText, { color: tone.text }]}>{grade}</Text>
         </View>
       </View>
     </View>
@@ -265,15 +314,21 @@ function MarkInput({
   max: number;
   onChangeValue: (raw: string) => void;
 }) {
+  const [isFocused, setIsFocused] = useState(false);
+
   return (
     <TextInput
-      style={styles.markInput}
+      style={[styles.markInput, isFocused && styles.markInputFocused, value != null && styles.markInputFilled]}
       value={value == null ? '' : String(value)}
       onChangeText={onChangeValue}
-      placeholder="-"
-      placeholderTextColor={colors.disabled}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      placeholder="–"
+      placeholderTextColor={colors.textTertiary}
       keyboardType="numeric"
       maxLength={String(max).length}
+      selectTextOnFocus
+      accessibilityLabel={`Mark out of ${max}`}
     />
   );
 }
@@ -283,72 +338,44 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
-    overflow: 'hidden',
+  flex: {
+    flex: 1,
   },
-  headerOrb: {
-    position: 'absolute',
-    top: -40,
-    right: -40,
-    width: 180,
-    height: 180,
-    borderRadius: borderRadius.full,
-    backgroundColor: withAlpha(colors.purple, 0.08),
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.glassLight,
-    borderWidth: 1,
-    borderColor: colors.glassBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  headerTitle: {
-    ...typography.h1,
-    fontSize: 24,
-    color: colors.surface,
-    marginBottom: spacing.xs,
-  },
-  headerSubtitle: {
-    ...typography.caption,
-    color: 'rgba(255,255,255,0.7)',
-    marginBottom: spacing.md,
-  },
-  dropdownRow: {
+
+  /* Header controls */
+  selectorRow: {
     flexDirection: 'row',
-    gap: spacing.sm + spacing.xs,
-    marginBottom: spacing.md,
+    gap: spacing.sm,
+    marginBottom: spacing.smd,
   },
-  dropdown: {
+  selector: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
     backgroundColor: colors.glassLight,
     borderWidth: 1,
     borderColor: colors.glassBorder,
-    borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.smd - 2,
   },
-  dropdownText: {
-    ...typography.caption,
-    color: colors.surface,
-    fontWeight: '600',
+  selectorText: {
+    ...typography.captionBold,
+    color: colors.textInverse,
+    flexShrink: 1,
   },
   examTabRow: {
     gap: spacing.sm,
+    paddingRight: spacing.lg,
   },
   examTab: {
-    paddingHorizontal: spacing.md,
+    minWidth: 54,
+    alignItems: 'center',
+    paddingHorizontal: spacing.smd,
     paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.full,
     backgroundColor: colors.glassLight,
     borderWidth: 1,
     borderColor: colors.glassBorder,
@@ -358,174 +385,176 @@ const styles = StyleSheet.create({
     borderColor: colors.surface,
   },
   examTabText: {
-    ...typography.caption,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.8)',
+    ...typography.captionBold,
+    color: withAlpha(colors.overlayLight, 0.8),
   },
   examTabTextActive: {
-    color: colors.primary,
+    color: ACCENT.text,
   },
+
+  /* Content */
   content: {
     padding: spacing.lg,
-    paddingBottom: spacing.xxl * 2,
+    paddingBottom: spacing.lg,
+    gap: spacing.smd,
   },
+
+  /* Exam info */
   examInfoCard: {
-    borderLeftWidth: 4,
-    marginBottom: spacing.md,
+    paddingLeft: spacing.md + 4,
+  },
+  examInfoRail: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 4,
   },
   examInfoTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
     marginBottom: spacing.sm,
   },
   examInfoName: {
     ...typography.h3,
     color: colors.text,
+    flex: 1,
   },
   maxBadge: {
-    paddingHorizontal: spacing.sm + spacing.xs,
+    paddingHorizontal: spacing.smd,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
+    backgroundColor: withAlpha(ACCENT.solid, 0.12),
   },
   maxBadgeText: {
-    ...typography.small,
+    ...typography.micro,
     fontWeight: '700',
+    color: ACCENT.text,
   },
   examInfoStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.xs + 2,
   },
   examInfoStatusLabel: {
-    ...typography.caption,
+    ...typography.small,
     color: colors.textSecondary,
+    marginRight: spacing.xxs,
   },
+
+  /* Table */
   tableCard: {
-    padding: 0,
-    marginBottom: spacing.md,
     overflow: 'hidden',
   },
   tableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
+    backgroundColor: colors.surfaceSunken,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.sm + 2,
   },
   tableHeaderCell: {
-    ...typography.small,
-    color: colors.surface,
+    ...typography.micro,
+    color: colors.textSecondary,
     fontWeight: '700',
     flex: 1,
     textAlign: 'center',
   },
   studentCol: {
-    flex: 2,
+    flex: 2.2,
     textAlign: 'left',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.sm + 2,
   },
   rowDivider: {
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  // A completed row picks up a faint tint, so scanning down the table shows
+  // how much is left without reading every cell.
+  rowComplete: {
+    backgroundColor: withAlpha(colors.success, 0.04),
+  },
   studentName: {
-    ...typography.caption,
-    fontWeight: '700',
+    ...typography.captionBold,
     color: colors.text,
   },
   studentRoll: {
-    ...typography.small,
-    color: colors.textSecondary,
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginTop: spacing.xxs,
   },
   markInput: {
     flex: 1,
-    ...typography.caption,
+    ...typography.captionBold,
     color: colors.text,
     textAlign: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    marginHorizontal: spacing.xs,
-    paddingVertical: spacing.xs,
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: borderRadius.sm,
+    marginHorizontal: spacing.xxs,
+    paddingVertical: spacing.sm,
+  },
+  markInputFilled: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+  },
+  markInputFocused: {
+    borderColor: ACCENT.solid,
+    backgroundColor: colors.surface,
   },
   gradeCol: {
     flex: 1,
     alignItems: 'center',
   },
   gradeBadge: {
+    minWidth: 34,
+    alignItems: 'center',
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.md,
+    paddingVertical: spacing.xs + 1,
+    borderRadius: borderRadius.xs,
   },
   gradeBadgeText: {
-    ...typography.small,
+    ...typography.micro,
     fontWeight: '700',
   },
-  emptyText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    padding: spacing.xl,
-  },
-  statsCard: {
-    marginBottom: spacing.md,
+
+  /* Stats */
+  statsTitle: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginBottom: spacing.smd,
   },
   statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  statItem: {
     alignItems: 'center',
   },
-  statValue: {
-    ...typography.h2,
-    marginBottom: spacing.xs,
+  statsDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: colors.border,
   },
-  statLabel: {
-    ...typography.small,
-    color: colors.textSecondary,
-  },
+
+  /* Action bar */
   actionBar: {
     flexDirection: 'row',
-    gap: spacing.sm + spacing.xs,
-    padding: spacing.lg,
+    gap: spacing.smd,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.smd,
     backgroundColor: colors.surface,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  saveDraftButton: {
+  actionButton: {
     flex: 1,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-  },
-  saveDraftButtonText: {
-    ...typography.bodyBold,
-    color: colors.primary,
-  },
-  submitButton: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.secondary,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-  },
-  submitButtonText: {
-    ...typography.bodyBold,
-    color: colors.surface,
   },
 });

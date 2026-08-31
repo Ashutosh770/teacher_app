@@ -16,18 +16,17 @@
  * which is an administrative path, not a button here.
  */
 import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { borderRadius, colors, spacing, withAlpha } from '../../../shared/theme';
+import {
+  borderRadius,
+  colors,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import { Button, Card, IconChip, Pressable } from '../../../shared/components';
 import { useAppDispatch } from '../../../store';
 import { grantConsent, type ConsentNotice } from '../../../shared/services/registration';
 import { loadRegistrationStatus, setNextStep } from '../state/registrationSlice';
@@ -69,135 +68,224 @@ export default function ConsentScreen({ notice }: Props) {
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        {
-          // Real insets, not a fixed guess: this screen renders with
-          // `headerShown: false`, so without them the draft banner sits under
-          // the status bar and the agree button under the gesture/nav bar —
-          // and the agree button is the one control the screen exists for.
-          paddingTop: insets.top + spacing.lg,
-          paddingBottom: insets.bottom + spacing.xl,
-        },
-      ]}
-    >
+    <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.surface} />
-      {notice.isDraft && (
-        <View style={styles.draftBanner}>
-          <Text style={styles.draftText}>
-            DRAFT NOTICE — placeholder wording, not for collecting real consent.
-          </Text>
-        </View>
-      )}
 
-      <Text style={styles.title}>{notice.title}</Text>
-      <Text style={styles.body}>{notice.body}</Text>
-
-      <View style={styles.purposes}>
-        {required.map(p => (
-          <View key={p.key} style={styles.purposeRow}>
-            <View style={[styles.checkbox, styles.checkboxLocked]}>
-              <Text style={styles.checkMark}>✓</Text>
-            </View>
-            <View style={styles.purposeText}>
-              <Text style={styles.purposeLabel}>{p.label}</Text>
-              <Text style={styles.purposeDescription}>{p.description}</Text>
-            </View>
-          </View>
-        ))}
-
-        {optionalPurposes.map(p => (
-          <Pressable
-            key={p.key}
-            style={styles.purposeRow}
-            onPress={() => setOptional(prev => ({ ...prev, [p.key]: !prev[p.key] }))}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: Boolean(optional[p.key]) }}
-          >
-            <View style={[styles.checkbox, optional[p.key] && styles.checkboxOn]}>
-              {optional[p.key] && <Text style={styles.checkMark}>✓</Text>}
-            </View>
-            <View style={styles.purposeText}>
-              <Text style={styles.purposeLabel}>{p.label}</Text>
-              <Text style={styles.purposeDescription}>{p.description}</Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-
-      <Pressable
-        style={[styles.agree, submitting && styles.agreeDisabled]}
-        onPress={onAgree}
-        disabled={submitting}
-        accessibilityRole="button"
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          {
+            // Real insets, not a fixed guess: this screen renders with
+            // `headerShown: false`, so without them the draft banner sits under
+            // the status bar and the agree button under the gesture/nav bar —
+            // and the agree button is the one control the screen exists for.
+            paddingTop: insets.top + spacing.lg,
+            paddingBottom: spacing.lg,
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
       >
-        {submitting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.agreeText}>I agree — continue</Text>
+        {notice.isDraft && (
+          <Card
+            elevation="none"
+            padding="md"
+            backgroundColor={withAlpha(colors.warning, 0.1)}
+            style={styles.draftBanner}
+          >
+            <View style={styles.draftRow}>
+              <Feather name="alert-triangle" size={18} color={colors.warningText} />
+              <Text style={styles.draftText}>
+                DRAFT NOTICE — placeholder wording, not for collecting real consent.
+              </Text>
+            </View>
+          </Card>
         )}
-      </Pressable>
 
-      <Text style={styles.footnote}>
-        You can withdraw this at any time. If you do not agree, your attendance will be
-        marked manually instead.
-      </Text>
-    </ScrollView>
+        <IconChip icon="shield" color={colors.primary} size={64} style={styles.heroIcon} />
+
+        <Text style={styles.title}>{notice.title}</Text>
+        <Text style={styles.body}>{notice.body}</Text>
+
+        <View style={styles.purposes}>
+          {required.length > 0 && (
+            <Text style={styles.groupLabel}>REQUIRED</Text>
+          )}
+          {required.map(p => (
+            <View key={p.key} style={[styles.purposeRow, styles.purposeRowLocked]}>
+              <View style={[styles.checkbox, styles.checkboxLocked]}>
+                <Feather name="check" size={14} color={colors.textInverse} />
+              </View>
+              <View style={styles.purposeText}>
+                <Text style={styles.purposeLabel}>{p.label}</Text>
+                <Text style={styles.purposeDescription}>{p.description}</Text>
+              </View>
+              <Feather name="lock" size={13} color={colors.textTertiary} />
+            </View>
+          ))}
+
+          {optionalPurposes.length > 0 && (
+            <Text style={[styles.groupLabel, styles.groupLabelSpaced]}>OPTIONAL</Text>
+          )}
+          {optionalPurposes.map(p => {
+            const checked = Boolean(optional[p.key]);
+            return (
+              <Pressable
+                key={p.key}
+                onPress={() => setOptional(prev => ({ ...prev, [p.key]: !prev[p.key] }))}
+                activeScale={0.99}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked }}
+                accessibilityLabel={`${p.label}. ${p.description}`}
+                style={[styles.purposeRow, checked && styles.purposeRowChecked]}
+              >
+                <View style={[styles.checkbox, checked && styles.checkboxOn]}>
+                  {checked && <Feather name="check" size={14} color={colors.textInverse} />}
+                </View>
+                <View style={styles.purposeText}>
+                  <Text style={styles.purposeLabel}>{p.label}</Text>
+                  <Text style={styles.purposeDescription}>{p.description}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      {/* The agree control is pinned rather than scrolled: on a long notice it
+          was previously below the fold with nothing indicating it was there. */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.smd }]}>
+        <Button
+          label="I agree — continue"
+          iconRight="arrow-right"
+          size="lg"
+          loading={submitting}
+          disabled={submitting}
+          onPress={onAgree}
+        />
+        <Text style={styles.footnote}>
+          You can withdraw this at any time. If you do not agree, your attendance will be marked
+          manually instead.
+        </Text>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.surface },
+  screen: {
+    flex: 1,
+    backgroundColor: colors.surface,
+  },
   // Horizontal padding only — vertical padding comes from the safe-area insets
   // applied inline, so it adapts to the device rather than guessing.
-  content: { paddingHorizontal: spacing.lg },
+  content: {
+    paddingHorizontal: spacing.lg,
+  },
+
   draftBanner: {
-    backgroundColor: withAlpha(colors.warning, 0.15),
-    borderColor: colors.warning,
+    marginBottom: spacing.lg,
     borderWidth: 1,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
+    borderColor: withAlpha(colors.warning, 0.4),
+  },
+  draftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  draftText: {
+    ...typography.small,
+    fontWeight: '700',
+    color: colors.warningText,
+    flex: 1,
+  },
+
+  heroIcon: {
+    marginBottom: spacing.md,
+  },
+  title: {
+    ...typography.h1,
+    color: colors.text,
+    marginBottom: spacing.smd,
+  },
+  body: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.xl,
+  },
+
+  purposes: {
     marginBottom: spacing.lg,
   },
-  draftText: { color: colors.text, fontSize: 13, fontWeight: '600' },
-  title: { fontSize: 22, fontWeight: '700', marginBottom: spacing.md, color: colors.text },
-  body: { fontSize: 15, lineHeight: 22, color: colors.textSecondary, marginBottom: spacing.xl },
-  purposes: { marginBottom: spacing.xl },
-  purposeRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.lg },
+  groupLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginBottom: spacing.sm,
+  },
+  groupLabelSpaced: {
+    marginTop: spacing.lg,
+  },
+  purposeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.smd,
+    padding: spacing.smd,
+    marginBottom: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSunken,
+  },
+  purposeRowLocked: {
+    backgroundColor: colors.background,
+  },
+  purposeRowChecked: {
+    borderColor: withAlpha(colors.primary, 0.45),
+    backgroundColor: withAlpha(colors.primary, 0.05),
+  },
   checkbox: {
     width: 24,
     height: 24,
-    borderRadius: borderRadius.sm,
+    borderRadius: borderRadius.xs,
     borderWidth: 2,
-    borderColor: colors.disabled,
+    borderColor: colors.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.md,
-    marginTop: 2,
+    marginTop: 1,
   },
-  checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  checkboxOn: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
   // Required purposes are shown ticked and non-interactive: enrollment is
   // impossible without them, so an unticked state would be a dead end.
-  checkboxLocked: { backgroundColor: colors.disabled, borderColor: colors.disabled },
-  checkMark: { color: colors.surface, fontSize: 15, fontWeight: '700' },
-  purposeText: { flex: 1 },
-  purposeLabel: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 2 },
-  purposeDescription: { fontSize: 13, lineHeight: 18, color: colors.textSecondary },
-  agree: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    paddingVertical: 15,
-    alignItems: 'center',
+  checkboxLocked: {
+    backgroundColor: colors.disabled,
+    borderColor: colors.disabled,
   },
-  agreeDisabled: { opacity: 0.6 },
-  agreeText: { color: colors.surface, fontSize: 16, fontWeight: '600' },
+  purposeText: {
+    flex: 1,
+  },
+  purposeLabel: {
+    ...typography.bodyBold,
+    color: colors.text,
+    marginBottom: spacing.xxs,
+  },
+  purposeDescription: {
+    ...typography.small,
+    color: colors.textSecondary,
+  },
+
+  footer: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.smd,
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    gap: spacing.smd,
+  },
   footnote: {
-    fontSize: 12,
+    ...typography.micro,
     color: colors.textSecondary,
     textAlign: 'center',
-    marginTop: spacing.lg,
-    lineHeight: 17,
   },
 });

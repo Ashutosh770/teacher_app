@@ -1,16 +1,19 @@
 import React from 'react';
-import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { borderRadius, colors, spacing, typography } from '../theme';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import StatusPill from './StatusPill';
+import { spacing } from '../theme';
 
 /**
- * Reusable offline-sync indicator (Req 15.3/15.5). Renders a pending-sync badge
- * (neutral/warning) and/or a distinct sync-failed badge (error) from the counts
- * derived off the Offline_Sync_Queue. Renders nothing when there is nothing to
- * show, so callers can drop it inline unconditionally.
+ * Offline-sync indicator (Req 15.3/15.5). Renders a pending-sync badge and/or a
+ * distinct sync-failed badge from the counts derived off the Offline_Sync_Queue,
+ * and nothing at all when there is nothing to show — so callers can drop it
+ * inline unconditionally.
  *
- * Used by both attendance modules so the pending vs failed presentation is
- * identical: the student roster passes aggregate counts, the single-record
- * staff flow passes `pending`/`failed` as 0/1.
+ * Now built on `StatusPill` rather than its own solid-fill badges. The previous
+ * version put white text on solid `#F5A623` (≈2:1) and solid `#E74C3C` (≈3.5:1),
+ * which made the pending badge effectively unreadable; more importantly it meant
+ * the app expressed the same "status" idea in two unrelated visual languages
+ * depending on which component drew it.
  */
 export interface SyncStatusBadgeProps {
   /** Number of records pending sync (status `pending`/`syncing`). */
@@ -46,22 +49,10 @@ export default function SyncStatusBadge({
   return (
     <View style={[styles.row, style]}>
       {pending > 0 && (
-        <View
-          style={[styles.badge, styles.badgePending]}
-          accessibilityRole="text"
-          accessibilityLabel={pendingLabel(pending)}
-        >
-          <Text style={styles.badgeText}>{pendingLabel(pending)}</Text>
-        </View>
+        <StatusPill label={pendingLabel(pending)} tone="warning" icon="upload-cloud" bordered />
       )}
       {failed > 0 && (
-        <View
-          style={[styles.badge, styles.badgeFailed]}
-          accessibilityRole="text"
-          accessibilityLabel={failedLabel(failed)}
-        >
-          <Text style={styles.badgeText}>{failedLabel(failed)}</Text>
-        </View>
+        <StatusPill label={failedLabel(failed)} tone="error" icon="alert-triangle" bordered />
       )}
     </View>
   );
@@ -72,23 +63,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-  },
-  badge: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-    marginRight: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  badgePending: {
-    backgroundColor: colors.warning,
-  },
-  badgeFailed: {
-    backgroundColor: colors.error,
-  },
-  badgeText: {
-    ...typography.small,
-    color: colors.surface,
-    fontWeight: '600',
+    gap: spacing.sm,
   },
 });

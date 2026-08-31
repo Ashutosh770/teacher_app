@@ -1,13 +1,28 @@
 import React, { useMemo } from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '../../../store';
-import { colors, spacing, typography, borderRadius } from '../../../shared/theme';
-import { GradientHeader, StatusPill } from '../../../shared/components';
+import {
+  borderRadius,
+  colors,
+  moduleAccent,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import {
+  Card,
+  EmptyState,
+  Pressable,
+  ScreenHeader,
+  StatTile,
+  StatusPill,
+} from '../../../shared/components';
 import { setSelectedDay } from '../state/timeTableSlice';
 import type { TimetableEntry } from '../../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ACCENT = moduleAccent.timetable;
 
 function parseStartMinutes(timeSlot: string): number | null {
   const start = timeSlot.split('-')[0]?.trim();
@@ -69,120 +84,163 @@ export default function TimeTableScreen() {
     return { classes: classes.length, free: free.length, sections: sections.size };
   }, [dayEntries]);
 
-  const renderPeriod = ({ item, index }: { item: { entry: TimetableEntry; startMinutes: number | null }; index: number }) => {
+  const renderPeriod = ({
+    item,
+    index,
+  }: {
+    item: { entry: TimetableEntry; startMinutes: number | null };
+    index: number;
+  }) => {
     const { entry } = item;
     const isCurrent = entry.id === currentEntryId;
     const isBreak = isBreakSubject(entry.subject);
     const isFree = isFreeSubject(entry.subject);
     const startTime = entry.timeSlot.split('-')[0]?.trim();
 
+    // Each period state gets its own fill, rail colour and pill, so the list
+    // is scannable by shape rather than only by reading the badge text.
+    const rail = isCurrent
+      ? colors.success
+      : isBreak
+        ? colors.warning
+        : isFree
+          ? colors.textTertiary
+          : colors.primary;
+
     return (
-      <View
-        style={[
-          styles.periodCard,
-          isCurrent ? styles.periodCardCurrent : isBreak ? styles.periodCardBreak : isFree ? styles.periodCardFree : null,
-        ]}
+      <Card
+        elevation={isCurrent ? 'md' : 'xs'}
+        padding="none"
+        bordered={!isCurrent}
+        backgroundColor={
+          isCurrent ? withAlpha(colors.success, 0.06) : isFree ? colors.surfaceSunken : colors.surface
+        }
+        style={[styles.periodCard, isCurrent && { borderWidth: 1.5, borderColor: withAlpha(colors.success, 0.4) }]}
       >
         <View style={styles.periodRow}>
+          <View style={[styles.periodRail, { backgroundColor: rail }]} />
+
           <View style={styles.periodTimeCol}>
-            <Text style={[styles.periodNumber, isCurrent && styles.periodNumberCurrent]}>P{index + 1}</Text>
-            <View style={styles.periodTimeRow}>
-              <Feather name="clock" size={11} color={isCurrent ? colors.secondaryDark : colors.textSecondary} />
-              <Text style={styles.periodTime}>{startTime}</Text>
-            </View>
+            <Text style={[styles.periodNumber, isCurrent && { color: colors.successText }]}>
+              P{index + 1}
+            </Text>
+            <Text style={styles.periodTime}>{startTime}</Text>
           </View>
 
           <View style={styles.periodInfo}>
-            <Text style={[styles.periodSubject, isCurrent && styles.periodSubjectCurrent]}>{entry.subject}</Text>
+            <Text style={[styles.periodSubject, isCurrent && { color: colors.successText }]} numberOfLines={1}>
+              {entry.subject}
+            </Text>
             {!!entry.className && (
-              <View>
-                <Text style={styles.periodClass}>{entry.className}</Text>
+              <View style={styles.periodMetaRow}>
+                <Text style={styles.periodClass} numberOfLines={1}>
+                  {entry.className}
+                </Text>
                 {!!entry.room && (
-                  <View style={styles.periodRoomRow}>
+                  <>
+                    <View style={styles.metaDot} />
                     <Feather name="map-pin" size={11} color={colors.textSecondary} />
-                    <Text style={styles.periodRoom}>{entry.room}</Text>
-                  </View>
+                    <Text style={styles.periodRoom} numberOfLines={1}>
+                      {entry.room}
+                    </Text>
+                  </>
                 )}
               </View>
             )}
           </View>
 
-          {isCurrent && <StatusPill label="Now" tone="success" />}
-          {isBreak && <StatusPill label="Break" tone="warning" />}
+          {isCurrent && <StatusPill label="Now" tone="success" icon="radio" />}
+          {isBreak && <StatusPill label="Break" tone="warning" icon="coffee" />}
           {isFree && <StatusPill label="Free" tone="neutral" />}
         </View>
-      </View>
+      </Card>
     );
   };
 
   return (
     <View style={styles.container}>
-      <GradientHeader
+      <ScreenHeader
         title="Timetable"
         subtitle="Your weekly schedule"
-        gradientColors={[colors.secondary, colors.secondaryDark]}
+        gradientColors={ACCENT.gradient}
       />
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.daySelector} contentContainerStyle={styles.daySelectorContent}>
-        {DAYS.map(day => {
-          const active = day === selectedDay;
-          return (
-            <TouchableOpacity
-              key={day}
-              onPress={() => dispatch(setSelectedDay(day))}
-              style={[styles.dayPill, active && styles.dayPillActive]}
-              accessibilityRole="button"
-              accessibilityLabel={day}
-            >
-              <Text style={[styles.dayPillText, active && styles.dayPillTextActive]}>{day}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      <View style={styles.daySelector}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.daySelectorContent}
+        >
+          {DAYS.map(day => {
+            const active = day === selectedDay;
+            return (
+              <Pressable
+                key={day}
+                onPress={() => dispatch(setSelectedDay(day))}
+                activeScale={0.94}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={day}
+                style={[styles.dayPill, active && styles.dayPillActive]}
+              >
+                <Text style={[styles.dayPillText, active && styles.dayPillTextActive]}>
+                  {day.slice(0, 3)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <FlatList
         data={dayEntries}
         keyExtractor={({ entry }) => entry.id}
         renderItem={renderPeriod}
         contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           currentEntry ? (
-            <View style={styles.currentBanner}>
-              <Feather name="clock" size={18} color={colors.secondaryDark} />
-              <View style={styles.currentBannerText}>
-                <Text style={styles.currentBannerTitle}>Currently in this period</Text>
-                <Text style={styles.currentBannerSubtitle}>
-                  {currentEntry.subject} - {currentEntry.className}
-                </Text>
+            <Card
+              elevation="sm"
+              padding="md"
+              backgroundColor={withAlpha(colors.success, 0.09)}
+              style={styles.currentBanner}
+            >
+              <View style={styles.currentBannerRow}>
+                <View style={styles.pulseWrap}>
+                  <View style={styles.pulseOuter} />
+                  <View style={styles.pulseInner} />
+                </View>
+                <View style={styles.currentBannerText}>
+                  <Text style={styles.currentBannerTitle}>In session now</Text>
+                  <Text style={styles.currentBannerSubtitle} numberOfLines={1}>
+                    {currentEntry.subject} · {currentEntry.className}
+                  </Text>
+                </View>
               </View>
-            </View>
+            </Card>
           ) : null
         }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Feather name="calendar" size={32} color={colors.disabled} />
-            <Text style={styles.emptyStateText}>No classes scheduled for {selectedDay}</Text>
-          </View>
+          <EmptyState
+            icon="calendar"
+            title="No classes scheduled"
+            message={`You have nothing on the timetable for ${selectedDay}.`}
+            tone="success"
+          />
         }
         ListFooterComponent={
           dayEntries.length > 0 ? (
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryTitle}>Today's Summary</Text>
+            <Card elevation="sm" padding="md" style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>{selectedDay} at a glance</Text>
               <View style={styles.summaryRow}>
-                <View style={styles.summaryStat}>
-                  <Text style={styles.summaryValue}>{summary.classes}</Text>
-                  <Text style={styles.summaryLabel}>Classes</Text>
-                </View>
-                <View style={styles.summaryStat}>
-                  <Text style={styles.summaryValue}>{summary.free}</Text>
-                  <Text style={styles.summaryLabel}>Free Period</Text>
-                </View>
-                <View style={styles.summaryStat}>
-                  <Text style={styles.summaryValue}>{summary.sections}</Text>
-                  <Text style={styles.summaryLabel}>Sections</Text>
-                </View>
+                <StatTile value={summary.classes} label="Classes" icon="book" tone={ACCENT.text} />
+                <View style={styles.summaryDivider} />
+                <StatTile value={summary.free} label="Free periods" icon="coffee" tone={colors.warningText} />
+                <View style={styles.summaryDivider} />
+                <StatTile value={summary.sections} label="Sections" icon="users" tone={colors.infoText} />
               </View>
-            </View>
+            </Card>
           ) : null
         }
       />
@@ -195,168 +253,166 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+
+  /* Day selector */
   daySelector: {
     backgroundColor: colors.surface,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    flexGrow: 0,
   },
   daySelectorContent: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
+    paddingVertical: spacing.smd,
     gap: spacing.sm,
   },
   dayPill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.background,
+    minWidth: 58,
+    alignItems: 'center',
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.surfaceSunken,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   dayPillActive: {
-    backgroundColor: colors.secondary,
+    backgroundColor: withAlpha(ACCENT.solid, 0.12),
+    borderColor: withAlpha(ACCENT.solid, 0.4),
   },
   dayPillText: {
-    ...typography.caption,
-    color: colors.text,
+    ...typography.captionBold,
+    color: colors.textSecondary,
   },
   dayPillTextActive: {
-    color: colors.surface,
-    fontWeight: '600',
+    color: ACCENT.text,
   },
+
+  /* List */
   listContent: {
     padding: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
+
+  /* Current-period banner */
   currentBanner: {
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: withAlpha(colors.success, 0.28),
+  },
+  currentBannerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: 'rgba(46, 204, 113, 0.1)',
-    borderLeftWidth: 4,
-    borderLeftColor: colors.secondary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
+    gap: spacing.smd,
+  },
+  pulseWrap: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulseOuter: {
+    position: 'absolute',
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.full,
+    backgroundColor: withAlpha(colors.success, 0.2),
+  },
+  pulseInner: {
+    width: 12,
+    height: 12,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.success,
   },
   currentBannerText: {
     flex: 1,
   },
   currentBannerTitle: {
-    ...typography.caption,
-    color: colors.text,
+    ...typography.captionBold,
+    color: colors.successText,
   },
   currentBannerSubtitle: {
     ...typography.small,
     color: colors.textSecondary,
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
+
+  /* Period card */
   periodCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    marginBottom: spacing.sm + spacing.xs,
-  },
-  periodCardCurrent: {
-    backgroundColor: 'rgba(46, 204, 113, 0.08)',
-    borderColor: colors.secondary,
-  },
-  periodCardBreak: {
-    backgroundColor: 'rgba(245, 166, 35, 0.08)',
-    borderColor: 'rgba(245, 166, 35, 0.3)',
-  },
-  periodCardFree: {
-    backgroundColor: colors.background,
+    marginBottom: spacing.smd,
   },
   periodRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
+    alignItems: 'center',
+    gap: spacing.smd,
+    paddingRight: spacing.md,
+    paddingVertical: spacing.smd,
+  },
+  periodRail: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderTopRightRadius: borderRadius.xs,
+    borderBottomRightRadius: borderRadius.xs,
+    minHeight: 44,
   },
   periodTimeCol: {
-    minWidth: 56,
+    minWidth: 46,
     alignItems: 'center',
   },
   periodNumber: {
-    ...typography.bodyBold,
+    ...typography.captionBold,
     color: colors.textSecondary,
-    marginBottom: 2,
-  },
-  periodNumberCurrent: {
-    color: colors.secondaryDark,
-  },
-  periodTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
   },
   periodTime: {
-    ...typography.small,
-    color: colors.textSecondary,
+    ...typography.micro,
+    color: colors.textTertiary,
+    marginTop: spacing.xxs,
   },
   periodInfo: {
     flex: 1,
-    gap: 2,
   },
   periodSubject: {
     ...typography.bodyBold,
     color: colors.text,
-    marginBottom: 2,
   },
-  periodSubjectCurrent: {
-    color: colors.secondaryDark,
-  },
-  periodClass: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  periodRoomRow: {
+  periodMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    marginTop: 2,
+    gap: spacing.xs,
+    marginTop: spacing.xxs,
+  },
+  periodClass: {
+    ...typography.small,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  metaDot: {
+    width: 3,
+    height: 3,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.textTertiary,
   },
   periodRoom: {
     ...typography.small,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxl,
-    gap: spacing.sm,
-  },
-  emptyStateText: {
-    ...typography.body,
-    color: colors.textSecondary,
-  },
+
+  /* Summary */
   summaryCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
     marginTop: spacing.sm,
   },
   summaryTitle: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
+    ...typography.label,
+    color: colors.textTertiary,
+    marginBottom: spacing.smd,
   },
   summaryRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  summaryStat: {
     alignItems: 'center',
   },
-  summaryValue: {
-    ...typography.h2,
-    color: colors.text,
-    marginBottom: 2,
-  },
-  summaryLabel: {
-    ...typography.small,
-    color: colors.textSecondary,
+  summaryDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: colors.border,
   },
 });

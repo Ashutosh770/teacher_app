@@ -1,7 +1,8 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useAppSelector } from '../../store';
-import { colors, spacing, typography } from '../theme';
+import EmptyState from './EmptyState';
+import { colors } from '../theme';
 
 /**
  * PermissionGate — access-gating wrapper for module screens (Req 16.3/16.4).
@@ -37,15 +38,16 @@ export default function PermissionGate({
   if (!isAllowed) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Access restricted</Text>
-        <Text style={styles.message}>
-          {moduleLabel
-            ? `You don't have access to ${moduleLabel}.`
-            : "You don't have access to this feature."}
-        </Text>
-        <Text style={styles.hint}>
-          Contact your administrator if you believe this is a mistake.
-        </Text>
+        <EmptyState
+          icon="lock"
+          tone="warning"
+          title="Access restricted"
+          message={
+            moduleLabel
+              ? `You don't have access to ${moduleLabel}. Contact your administrator if you believe this is a mistake.`
+              : "You don't have access to this feature. Contact your administrator if you believe this is a mistake."
+          }
+        />
       </View>
     );
   }
@@ -57,25 +59,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: colors.background,
-    padding: spacing.lg,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.text,
-    marginBottom: spacing.sm,
-    textAlign: 'center',
-  },
-  message: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  hint: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
   },
 });

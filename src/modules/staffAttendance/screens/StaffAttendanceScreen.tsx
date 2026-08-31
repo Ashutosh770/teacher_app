@@ -18,8 +18,8 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAppSelector } from '../../../store';
-import { colors, spacing, typography } from '../../../shared/theme';
-import { GradientHeader } from '../../../shared/components';
+import { colors, moduleAccent, spacing, typography } from '../../../shared/theme';
+import { ScreenHeader } from '../../../shared/components';
 import { staffAttendanceService } from '../services/staffAttendanceService';
 import { useStaffEnrollmentGuard } from '../services/staffEnrollmentGuard';
 import type { StaffFlowState } from '../state/staffAttendanceSlice';
@@ -107,7 +107,13 @@ export default function StaffAttendanceScreen({ embedded = false }: StaffAttenda
 
   return (
     <View style={styles.screen}>
-      {!embedded && <GradientHeader title="Mark Attendance" />}
+      {!embedded && (
+        <ScreenHeader
+          title="Mark Attendance"
+          subtitle="Verify your location and face"
+          gradientColors={moduleAccent.attendance.gradient}
+        />
+      )}
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {step === 'loading' ? (
           <View style={styles.centered}>

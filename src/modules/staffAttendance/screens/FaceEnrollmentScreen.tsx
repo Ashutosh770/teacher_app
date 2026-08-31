@@ -22,14 +22,21 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraFormat } from 'react-native-vision-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useAppDispatch, useAppSelector } from '../../../store';
-import { borderRadius, colors, spacing, typography } from '../../../shared/theme';
+import {
+  borderRadius,
+  colors,
+  gradients,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import { Button, Card, EmptyState, ProgressBar } from '../../../shared/components';
 import { faceCaptureService, FACE_PHOTO_RESOLUTION } from '../../../shared/services/faceCapture';
 import { cameraPermissionManager } from '../../../shared/services/permissions';
 import type { CapturedFrame } from '../../../shared/services/faceMatch/types';
@@ -191,7 +198,12 @@ export default function FaceEnrollmentScreen() {
   if (!teacherId) {
     return (
       <View style={[styles.screen, styles.centered]}>
-        <Text style={styles.subtitle}>You must be signed in to enroll your face.</Text>
+        <EmptyState
+          icon="user-x"
+          tone="warning"
+          title="Not signed in"
+          message="You must be signed in to enroll your face."
+        />
       </View>
     );
   }
@@ -207,13 +219,23 @@ export default function FaceEnrollmentScreen() {
       ]}
     >
       <Text style={styles.title}>Face Enrollment</Text>
+      {phase !== 'done' && phase !== 'idle' ? (
+        <ProgressBar
+          progress={total > 0 ? stagedCount / total : 0}
+          colors={gradients.success}
+          height={7}
+          label="Enrollment photos saved"
+          style={styles.headerProgress}
+        />
+      ) : null}
 
       {phase === 'done' ? (
-        <View style={styles.doneCard}>
-          <Feather name="check-circle" size={40} color={colors.success} />
-          <Text style={styles.doneText}>Enrollment complete</Text>
-          <Text style={styles.subtitle}>{stagedCount} photos saved.</Text>
-        </View>
+        <EmptyState
+          icon="check-circle"
+          tone="success"
+          title="Enrollment complete"
+          message={`${stagedCount} photo${stagedCount === 1 ? '' : 's'} saved. You can now mark attendance with face verification.`}
+        />
       ) : (
         <>
           {/* Preview of the shot under review, otherwise the live camera. */}
@@ -240,6 +262,30 @@ export default function FaceEnrollmentScreen() {
             {phase === 'reviewing' && preview ? (
               <Image source={{ uri: preview.uri }} style={StyleSheet.absoluteFill} />
             ) : null}
+
+            {/* Pose dots ride on the frame itself, so progress is visible while
+                the user is looking at the camera rather than at the caption. */}
+            {phase !== 'idle' ? (
+              <View style={styles.poseDots} pointerEvents="none">
+                {Array.from({ length: total }, (_, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.poseDot,
+                      i < stagedCount && styles.poseDotDone,
+                      i === poseIndex && styles.poseDotCurrent,
+                    ]}
+                  />
+                ))}
+              </View>
+            ) : null}
+
+            {phase === 'reviewing' ? (
+              <View style={styles.reviewTag} pointerEvents="none">
+                <Feather name="image" size={13} color={colors.textInverse} />
+                <Text style={styles.reviewTagText}>Review</Text>
+              </View>
+            ) : null}
           </View>
 
           {phase === 'idle' ? (
@@ -249,49 +295,66 @@ export default function FaceEnrollmentScreen() {
                   ? 'You are already enrolled. Re-enrolling replaces your existing photos.'
                   : `You will take ${total} photos, one at a time. You can review and retake each one.`}
               </Text>
-              <TouchableOpacity
-                style={styles.primaryButton}
+              <Button
+                label={hasRecord ? 'Re-enroll' : 'Start enrollment'}
+                icon={hasRecord ? 'refresh-cw' : 'camera'}
+                size="lg"
                 onPress={hasRecord ? confirmReEnroll : begin}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {hasRecord ? 'Re-enroll' : 'Start enrollment'}
-                </Text>
-              </TouchableOpacity>
+              />
             </>
           ) : (
             <>
               <Text style={styles.stepLabel}>
-                Photo {Math.min(poseIndex + 1, total)} of {total} · {stagedCount} saved
+                PHOTO {Math.min(poseIndex + 1, total)} OF {total} · {stagedCount} SAVED
               </Text>
               <Text style={styles.instruction}>{pose.instruction}</Text>
 
-              {message ? <Text style={styles.errorText}>{message}</Text> : null}
+              {message ? (
+                <Card
+                  elevation="none"
+                  padding="sm"
+                  backgroundColor={colors.errorSoft}
+                  style={styles.errorBanner}
+                >
+                  <View style={styles.errorRow}>
+                    <Feather name="alert-circle" size={16} color={colors.errorText} />
+                    <Text style={styles.errorText}>{message}</Text>
+                  </View>
+                </Card>
+              ) : null}
 
               {phase === 'reviewing' ? (
                 <View style={styles.reviewRow}>
-                  <TouchableOpacity
-                    style={[styles.secondaryButton, isBusy && styles.disabled]}
+                  <Button
+                    label="Retake"
+                    icon="rotate-ccw"
+                    variant="outline"
+                    size="lg"
                     onPress={onRetake}
                     disabled={isBusy}
-                  >
-                    <Text style={styles.secondaryButtonText}>Retake</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.primaryButton, styles.flex, isBusy && styles.disabled]}
+                    style={styles.reviewAction}
+                  />
+                  <Button
+                    label="Use this"
+                    icon="check"
+                    size="lg"
                     onPress={onKeep}
                     disabled={isBusy}
-                  >
-                    <Text style={styles.primaryButtonText}>Use this photo</Text>
-                  </TouchableOpacity>
+                    tone={{ gradient: gradients.success }}
+                    style={styles.reviewAction}
+                  />
                 </View>
               ) : (
-                <TouchableOpacity
-                  style={[styles.primaryButton, isBusy && styles.disabled]}
+                // `onKeep` moves the phase out of `reviewing`, so an in-flight
+                // upload lands here rather than on the review pair above.
+                <Button
+                  label={phase === 'uploading' ? 'Uploading…' : 'Take photo'}
+                  icon="camera"
+                  size="lg"
                   onPress={onCapture}
+                  loading={isBusy}
                   disabled={isBusy}
-                >
-                  <Text style={styles.primaryButtonText}>Take photo</Text>
-                </TouchableOpacity>
+                />
               )}
 
               {isBusy ? (
@@ -306,15 +369,16 @@ export default function FaceEnrollmentScreen() {
               {/* Available as soon as the server would accept a commit, so a
                   user who is happy after three good photos need not take five. */}
               {canFinish && phase !== 'reviewing' ? (
-                <TouchableOpacity
-                  style={[styles.finishButton, isBusy && styles.disabled]}
+                <Button
+                  label={`Finish enrollment (${stagedCount} photos)`}
+                  icon="check-circle"
+                  size="lg"
                   onPress={onFinish}
+                  loading={phase === 'committing'}
                   disabled={isBusy}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    Finish enrollment ({stagedCount} photos)
-                  </Text>
-                </TouchableOpacity>
+                  tone={{ gradient: gradients.success }}
+                  style={styles.finishButton}
+                />
               ) : null}
             </>
           )}
@@ -328,58 +392,120 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: spacing.lg },
   centered: { alignItems: 'center', justifyContent: 'center' },
-  flex: { flex: 1 },
-  title: { ...typography.h2, color: colors.text, marginBottom: spacing.md },
+  title: {
+    ...typography.h2,
+    color: colors.text,
+    marginBottom: spacing.smd,
+  },
+  headerProgress: {
+    marginBottom: spacing.md,
+  },
   subtitle: {
     ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
     textAlign: 'center',
   },
+
+  /* Camera frame */
   frame: {
-    height: 320,
-    borderRadius: borderRadius.lg,
+    height: 340,
+    borderRadius: borderRadius.xl,
     overflow: 'hidden',
-    backgroundColor: colors.primaryDark,
-    marginBottom: spacing.lg,
+    backgroundColor: colors.cameraBackdrop,
+    marginBottom: spacing.md,
   },
-  stepLabel: { ...typography.caption, color: colors.textSecondary, textAlign: 'center' },
+  poseDots: {
+    position: 'absolute',
+    bottom: spacing.smd,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  poseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: borderRadius.full,
+    backgroundColor: withAlpha(colors.overlayLight, 0.35),
+  },
+  poseDotDone: {
+    backgroundColor: colors.success,
+  },
+  poseDotCurrent: {
+    width: 22,
+    backgroundColor: colors.textInverse,
+  },
+  reviewTag: {
+    position: 'absolute',
+    top: spacing.smd,
+    left: spacing.smd,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: withAlpha(colors.overlayDark, 0.6),
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.smd,
+    paddingVertical: spacing.xs + 1,
+  },
+  reviewTagText: {
+    ...typography.micro,
+    fontWeight: '700',
+    color: colors.textInverse,
+  },
+
+  /* Instructions */
+  stepLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+    textAlign: 'center',
+  },
   instruction: {
     ...typography.h3,
     color: colors.text,
     textAlign: 'center',
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
     marginBottom: spacing.lg,
   },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    paddingVertical: 15,
-    alignItems: 'center',
+
+  /* Actions */
+  reviewRow: {
+    flexDirection: 'row',
+    gap: spacing.smd,
   },
-  primaryButtonText: { color: colors.surface, fontSize: 16, fontWeight: '600' },
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingVertical: 15,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    marginRight: spacing.md,
+  reviewAction: {
+    flex: 1,
   },
-  secondaryButtonText: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  reviewRow: { flexDirection: 'row', alignItems: 'center' },
   finishButton: {
-    backgroundColor: colors.success,
-    borderRadius: borderRadius.md,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: spacing.md,
+    marginTop: spacing.smd,
   },
-  disabled: { opacity: 0.6 },
-  busyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: spacing.md },
-  busyText: { ...typography.body, color: colors.text, marginLeft: spacing.sm },
-  errorText: { ...typography.caption, color: colors.error, textAlign: 'center', marginBottom: spacing.sm },
-  doneCard: { alignItems: 'center', paddingVertical: spacing.xl },
-  doneText: { ...typography.h3, color: colors.text, marginTop: spacing.md, marginBottom: spacing.xs },
+  busyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.smd,
+  },
+  busyText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
+
+  /* Error */
+  errorBanner: {
+    marginBottom: spacing.smd,
+    borderWidth: 1,
+    borderColor: withAlpha(colors.error, 0.25),
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  errorText: {
+    ...typography.caption,
+    color: colors.errorText,
+    flex: 1,
+  },
 });

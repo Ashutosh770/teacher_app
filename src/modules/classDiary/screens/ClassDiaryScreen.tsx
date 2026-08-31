@@ -1,10 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { borderRadius, colors, spacing, typography, withAlpha } from '../../../shared/theme';
-import { StatusPill } from '../../../shared/components';
+import {
+  borderRadius,
+  colors,
+  moduleAccent,
+  spacing,
+  typography,
+  withAlpha,
+} from '../../../shared/theme';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Input,
+  Pressable,
+  ScreenHeader,
+  SectionHeader,
+  StatusPill,
+} from '../../../shared/components';
 import { useAppSelector } from '../../../store';
 import {
   isWithinEditWindow,
@@ -22,9 +37,7 @@ const CLASSES = [
 ];
 const SUBJECTS = ['Mathematics', 'Algebra', 'Geometry'];
 
-const INDIGO = '#4F46E5';
-const INDIGO_DARK = '#4338CA';
-const PURPLE = colors.purple;
+const ACCENT = moduleAccent.diary;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -79,200 +92,249 @@ export default function ClassDiaryScreen() {
 
   return (
     <View style={styles.screen}>
-      <LinearGradient colors={[INDIGO, INDIGO_DARK]} style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Feather name="arrow-left" size={22} color={colors.surface} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Class Diary</Text>
-        <Text style={styles.headerSubtitle}>Post homework and notes</Text>
-      </LinearGradient>
-
-      <FlatList
-        data={entries}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.content}
-        ListHeaderComponent={
-          <>
-            <TouchableOpacity
-              style={styles.newEntryButton}
-              onPress={() => setShowForm(v => !v)}
-              accessibilityRole="button"
-            >
-              <Feather name="plus" size={18} color={colors.surface} />
-              <Text style={styles.newEntryButtonText}>New Diary Entry</Text>
-            </TouchableOpacity>
-
-            {showForm && (
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>Create New Entry</Text>
-
-                <View style={styles.formRow}>
-                  <View style={styles.formField}>
-                    <Text style={styles.label}>Class</Text>
-                    <PillCycle
-                      value={CLASSES[classIndex].name}
-                      onPress={() => setClassIndex(i => (i + 1) % CLASSES.length)}
-                    />
-                  </View>
-                  <View style={styles.formField}>
-                    <Text style={styles.label}>Subject</Text>
-                    <PillCycle
-                      value={SUBJECTS[subjectIndex]}
-                      onPress={() => setSubjectIndex(i => (i + 1) % SUBJECTS.length)}
-                    />
-                  </View>
-                </View>
-
-                <Text style={styles.label}>Date</Text>
-                <TextInput
-                  style={styles.input}
-                  value={date}
-                  onChangeText={setDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.textSecondary}
-                />
-
-                <Text style={styles.label}>Topics Covered</Text>
-                <TextInput
-                  style={styles.textarea}
-                  value={topicsCovered}
-                  onChangeText={setTopicsCovered}
-                  placeholder="Enter class notes / topics covered..."
-                  placeholderTextColor={colors.textSecondary}
-                  multiline
-                  numberOfLines={3}
-                />
-
-                <Text style={styles.label}>Homework</Text>
-                <TextInput
-                  style={styles.textarea}
-                  value={homework}
-                  onChangeText={setHomework}
-                  placeholder="Enter homework..."
-                  placeholderTextColor={colors.textSecondary}
-                  multiline
-                  numberOfLines={3}
-                />
-
-                <Text style={styles.label}>Attachments</Text>
-                <View style={styles.uploadZone}>
-                  <Feather name="paperclip" size={22} color={colors.disabled} />
-                  <Text style={styles.uploadZoneText}>File upload coming soon</Text>
-                  <Text style={styles.uploadZoneHint}>PDF, Images up to 5MB</Text>
-                </View>
-
-                {error && <Text style={styles.errorText}>{error}</Text>}
-
-                <View style={styles.formActions}>
-                  <TouchableOpacity style={styles.postButton} onPress={handlePost} accessibilityRole="button">
-                    <Text style={styles.postButtonText}>Post Entry</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={() => {
-                      setShowForm(false);
-                      resetForm();
-                    }}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            <Text style={styles.sectionTitle}>Recent Entries</Text>
-          </>
-        }
-        renderItem={({ item }) => <DiaryCard entry={item} onDelete={() => handleDelete(item)} />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Feather name="book-open" size={32} color={colors.disabled} />
-            <Text style={styles.emptyText}>No diary entries yet</Text>
-          </View>
-        }
-        ListFooterComponent={
-          <View style={styles.infoBanner}>
-            <Text style={styles.infoBannerText}>
-              <Text style={styles.infoBannerBold}>Note: </Text>
-              Entries can be edited or deleted within 24 hours of posting. After that, they are
-              locked for record-keeping.
-            </Text>
-          </View>
-        }
+      <ScreenHeader
+        title="Class Diary"
+        subtitle="Post homework and notes"
+        gradientColors={ACCENT.gradient}
+        onBack={() => navigation.goBack()}
       />
+
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <FlatList
+          data={entries}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <>
+              {!showForm && (
+                <Button
+                  label="New diary entry"
+                  icon="plus"
+                  size="lg"
+                  tone={{ gradient: ACCENT.gradient }}
+                  onPress={() => setShowForm(true)}
+                  style={styles.newEntryButton}
+                />
+              )}
+
+              {showForm && (
+                <Card elevation="md" padding="lg" style={styles.formCard}>
+                  <Text style={styles.formTitle}>Create new entry</Text>
+
+                  <View style={styles.formRow}>
+                    <View style={styles.formField}>
+                      <Text style={styles.fieldLabel}>Class</Text>
+                      <PillCycle
+                        value={CLASSES[classIndex].name}
+                        onPress={() => setClassIndex(i => (i + 1) % CLASSES.length)}
+                      />
+                    </View>
+                    <View style={styles.formField}>
+                      <Text style={styles.fieldLabel}>Subject</Text>
+                      <PillCycle
+                        value={SUBJECTS[subjectIndex]}
+                        onPress={() => setSubjectIndex(i => (i + 1) % SUBJECTS.length)}
+                      />
+                    </View>
+                  </View>
+
+                  <Input
+                    label="Date"
+                    value={date}
+                    onChangeText={setDate}
+                    placeholder="YYYY-MM-DD"
+                    icon="calendar"
+                    containerStyle={styles.field}
+                  />
+
+                  <Input
+                    label="Topics covered"
+                    value={topicsCovered}
+                    onChangeText={setTopicsCovered}
+                    placeholder="What did you teach today?"
+                    multiline
+                    numberOfLines={3}
+                    inputStyle={styles.textarea}
+                    containerStyle={styles.field}
+                  />
+
+                  <Input
+                    label="Homework"
+                    value={homework}
+                    onChangeText={setHomework}
+                    placeholder="What should students complete?"
+                    multiline
+                    numberOfLines={3}
+                    inputStyle={styles.textarea}
+                    error={error}
+                    containerStyle={styles.field}
+                  />
+
+                  <Text style={styles.fieldLabel}>Attachments</Text>
+                  <View style={styles.uploadZone}>
+                    <Feather name="paperclip" size={20} color={colors.textTertiary} />
+                    <Text style={styles.uploadZoneText}>File upload coming soon</Text>
+                    <Text style={styles.uploadZoneHint}>PDF or images, up to 5 MB</Text>
+                  </View>
+
+                  <View style={styles.formActions}>
+                    <Button
+                      label="Cancel"
+                      variant="outline"
+                      onPress={() => {
+                        setShowForm(false);
+                        resetForm();
+                      }}
+                      style={styles.formAction}
+                    />
+                    <Button
+                      label="Post entry"
+                      icon="send"
+                      tone={{ gradient: ACCENT.gradient }}
+                      onPress={handlePost}
+                      style={styles.formAction}
+                    />
+                  </View>
+                </Card>
+              )}
+
+              <SectionHeader
+                title="Recent entries"
+                caption={
+                  entries.length > 0
+                    ? `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`
+                    : undefined
+                }
+                style={styles.sectionHeader}
+              />
+            </>
+          }
+          renderItem={({ item }) => <DiaryCard entry={item} onDelete={() => handleDelete(item)} />}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ListEmptyComponent={
+            <EmptyState
+              icon="book-open"
+              tone="info"
+              title="No diary entries yet"
+              message="Post your first entry to share today's topics and homework with the class."
+            />
+          }
+          ListFooterComponent={
+            <Card
+              elevation="none"
+              padding="md"
+              backgroundColor={withAlpha(colors.info, 0.07)}
+              style={styles.infoBanner}
+            >
+              <View style={styles.infoBannerRow}>
+                <Feather name="info" size={16} color={colors.infoText} />
+                <Text style={styles.infoBannerText}>
+                  Entries can be edited or deleted within 24 hours of posting. After that they are
+                  locked for record-keeping.
+                </Text>
+              </View>
+            </Card>
+          }
+        />
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 function PillCycle({ value, onPress }: { value: string; onPress: () => void }) {
   return (
-    <TouchableOpacity style={styles.pillCycle} onPress={onPress} accessibilityRole="button">
+    <Pressable
+      onPress={onPress}
+      activeScale={0.97}
+      accessibilityRole="button"
+      accessibilityLabel={`${value}. Tap to change.`}
+      style={styles.pillCycle}
+    >
       <Text style={styles.pillCycleText} numberOfLines={1}>
         {value}
       </Text>
-      <Feather name="chevron-down" size={16} color={colors.text} />
-    </TouchableOpacity>
+      <Feather name="chevron-down" size={15} color={colors.textSecondary} />
+    </Pressable>
   );
 }
 
 function DiaryCard({ entry, onDelete }: { entry: DiaryEntry; onDelete: () => void }) {
   const editable = isWithinEditWindow(entry);
+
   return (
-    <View style={styles.card}>
+    <Card elevation="sm" padding="md">
       <View style={styles.cardTopRow}>
         <View style={styles.cardDateRow}>
-          <Feather name="calendar" size={14} color={colors.textSecondary} />
+          <Feather name="calendar" size={13} color={colors.textSecondary} />
           <Text style={styles.cardDate}>{entry.date}</Text>
         </View>
         <View style={styles.cardBadgeRow}>
           <StatusPill label={entry.className} tone="info" />
-          <View style={[styles.subjectPill, { backgroundColor: withAlpha(PURPLE, 0.12) }]}>
-            <Text style={[styles.subjectPillText, { color: PURPLE }]}>{entry.subject}</Text>
-          </View>
+          <StatusPill label={entry.subject} tone="brand" />
         </View>
       </View>
 
       <Text style={styles.cardContent}>{entry.topicsCovered}</Text>
-      {!!entry.homework && <Text style={styles.cardHomework}>Homework: {entry.homework}</Text>}
+
+      {!!entry.homework && (
+        <View style={styles.homeworkBlock}>
+          <View style={styles.homeworkLabelRow}>
+            <Feather name="edit-3" size={12} color={colors.warningText} />
+            <Text style={styles.homeworkLabel}>HOMEWORK</Text>
+          </View>
+          <Text style={styles.homeworkText}>{entry.homework}</Text>
+        </View>
+      )}
 
       {entry.attachmentName && (
         <View style={styles.attachmentChip}>
           <View style={styles.attachmentIcon}>
-            <Feather name="paperclip" size={16} color={INDIGO} />
+            <Feather name="paperclip" size={15} color={ACCENT.text} />
           </View>
-          <View>
-            <Text style={styles.attachmentName}>{entry.attachmentName}</Text>
-            <Text style={styles.attachmentType}>PDF Document</Text>
+          <View style={styles.attachmentText}>
+            <Text style={styles.attachmentName} numberOfLines={1}>
+              {entry.attachmentName}
+            </Text>
+            <Text style={styles.attachmentType}>PDF document</Text>
           </View>
         </View>
       )}
 
       <View style={styles.cardFooter}>
         <Text style={styles.postedText}>Posted {relativeTimeFromNow(entry.postedAt)}</Text>
+
         {editable ? (
           <View style={styles.cardActions}>
-            <TouchableOpacity accessibilityRole="button">
+            <Pressable
+              dimOnPress
+              accessibilityRole="button"
+              accessibilityLabel={`Edit entry for ${entry.subject}`}
+              style={styles.cardAction}
+            >
+              <Feather name="edit-2" size={13} color={colors.primaryText} />
               <Text style={styles.editLink}>Edit</Text>
-            </TouchableOpacity>
-            <Text style={styles.actionDot}>•</Text>
-            <TouchableOpacity onPress={onDelete} accessibilityRole="button">
+            </Pressable>
+            <Pressable
+              onPress={onDelete}
+              dimOnPress
+              accessibilityRole="button"
+              accessibilityLabel={`Delete entry for ${entry.subject}`}
+              style={styles.cardAction}
+            >
+              <Feather name="trash-2" size={13} color={colors.errorText} />
               <Text style={styles.deleteLink}>Delete</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         ) : (
-          <View style={styles.lockedRow}>
-            <Feather name="lock" size={12} color={colors.textSecondary} />
-            <Text style={styles.lockedText}>Locked</Text>
-          </View>
+          <StatusPill label="Locked" tone="neutral" icon="lock" />
         )}
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -281,185 +343,104 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.full,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  headerTitle: {
-    ...typography.h2,
-    color: colors.surface,
-  },
-  headerSubtitle: {
-    ...typography.caption,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: spacing.xs,
+  flex: {
+    flex: 1,
   },
   content: {
     padding: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
+  separator: {
+    height: spacing.smd,
+  },
+
+  /* Form */
   newEntryButton: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: INDIGO,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
     marginBottom: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  newEntryButtonText: {
-    ...typography.bodyBold,
-    color: colors.surface,
   },
   formCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    padding: spacing.lg,
     marginBottom: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 3,
   },
   formTitle: {
     ...typography.h3,
     color: colors.text,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   formRow: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: spacing.smd,
     marginBottom: spacing.md,
   },
   formField: {
     flex: 1,
   },
-  label: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
+  fieldLabel: {
+    ...typography.captionBold,
+    color: colors.text,
+    marginBottom: spacing.sm,
   },
   pillCycle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
+    gap: spacing.sm,
+    minHeight: 50,
+    backgroundColor: colors.surfaceSunken,
+    borderWidth: 1.5,
     borderColor: colors.border,
     borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
+    paddingHorizontal: spacing.smd,
   },
   pillCycleText: {
     ...typography.caption,
     color: colors.text,
-    fontWeight: '600',
     flexShrink: 1,
   },
-  input: {
-    ...typography.body,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
+  field: {
     marginBottom: spacing.md,
   },
   textarea: {
-    ...typography.body,
-    color: colors.text,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + spacing.xs,
-    marginBottom: spacing.md,
-    minHeight: 72,
+    minHeight: 76,
     textAlignVertical: 'top',
+    paddingTop: spacing.smd,
   },
   uploadZone: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.lg,
     alignItems: 'center',
-    marginBottom: spacing.md,
+    gap: spacing.xs,
+    paddingVertical: spacing.lg,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.borderStrong,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surfaceSunken,
+    marginBottom: spacing.lg,
   },
   uploadZoneText: {
     ...typography.caption,
     color: colors.textSecondary,
-    marginTop: spacing.sm,
   },
   uploadZoneHint: {
-    ...typography.small,
-    color: colors.disabled,
-    marginTop: 2,
-  },
-  errorText: {
-    ...typography.caption,
-    color: colors.error,
-    marginBottom: spacing.md,
+    ...typography.micro,
+    color: colors.textTertiary,
   },
   formActions: {
     flexDirection: 'row',
-    gap: spacing.sm + spacing.xs,
+    gap: spacing.smd,
   },
-  postButton: {
+  formAction: {
     flex: 1,
-    backgroundColor: INDIGO,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
   },
-  postButtonText: {
-    ...typography.bodyBold,
-    color: colors.surface,
+  sectionHeader: {
+    marginBottom: spacing.smd,
   },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    ...typography.bodyBold,
-    color: colors.text,
-  },
-  sectionTitle: {
-    ...typography.h3,
-    color: colors.text,
-    marginBottom: spacing.md,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
+
+  /* Entry card */
   cardTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.sm + spacing.xs,
+    gap: spacing.sm,
+    marginBottom: spacing.smd,
   },
   cardDateRow: {
     flexDirection: 'row',
@@ -467,120 +448,124 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   cardDate: {
-    ...typography.small,
+    ...typography.micro,
     color: colors.textSecondary,
   },
   cardBadgeRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.xs,
-  },
-  subjectPill: {
-    paddingHorizontal: spacing.sm + spacing.xs,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-  },
-  subjectPillText: {
-    ...typography.small,
-    fontWeight: '700',
+    flexShrink: 1,
   },
   cardContent: {
-    ...typography.body,
-    color: colors.text,
-    lineHeight: 22,
-    marginBottom: spacing.sm,
-  },
-  cardHomework: {
     ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
+    color: colors.text,
+  },
+  homeworkBlock: {
+    marginTop: spacing.smd,
+    padding: spacing.smd,
+    borderRadius: borderRadius.sm,
+    backgroundColor: withAlpha(colors.warning, 0.08),
+    borderLeftWidth: 3,
+    borderLeftColor: colors.warning,
+  },
+  homeworkLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  homeworkLabel: {
+    ...typography.micro,
+    fontWeight: '700',
+    color: colors.warningText,
+    letterSpacing: 0.6,
+  },
+  homeworkText: {
+    ...typography.caption,
+    color: colors.text,
   },
   attachmentChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm + spacing.xs,
-    backgroundColor: colors.background,
+    gap: spacing.sm,
+    marginTop: spacing.smd,
+    padding: spacing.sm,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.surfaceSunken,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm + spacing.xs,
-    marginBottom: spacing.md,
   },
   attachmentIcon: {
-    backgroundColor: withAlpha(INDIGO, 0.12),
-    padding: spacing.xs + 2,
-    borderRadius: borderRadius.sm,
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.xs,
+    backgroundColor: withAlpha(ACCENT.solid, 0.12),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentText: {
+    flex: 1,
   },
   attachmentName: {
-    ...typography.caption,
+    ...typography.captionBold,
     color: colors.text,
-    fontWeight: '600',
   },
   attachmentType: {
-    ...typography.small,
-    color: colors.textSecondary,
+    ...typography.micro,
+    color: colors.textTertiary,
   },
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderTopWidth: 1,
+    gap: spacing.sm,
+    marginTop: spacing.smd,
+    paddingTop: spacing.smd,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
-    paddingTop: spacing.sm + spacing.xs,
   },
   postedText: {
-    ...typography.small,
-    color: colors.textSecondary,
+    ...typography.micro,
+    color: colors.textTertiary,
+    flex: 1,
   },
   cardActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.smd,
   },
-  editLink: {
-    ...typography.small,
-    color: INDIGO,
-    fontWeight: '700',
-  },
-  actionDot: {
-    ...typography.small,
-    color: colors.disabled,
-  },
-  deleteLink: {
-    ...typography.small,
-    color: colors.error,
-    fontWeight: '700',
-  },
-  lockedRow: {
+  cardAction: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    paddingVertical: spacing.xs,
   },
-  lockedText: {
-    ...typography.small,
-    color: colors.textSecondary,
+  editLink: {
+    ...typography.micro,
+    fontWeight: '700',
+    color: colors.primaryText,
   },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxl,
+  deleteLink: {
+    ...typography.micro,
+    fontWeight: '700',
+    color: colors.errorText,
+  },
+
+  /* Footer note */
+  infoBanner: {
+    marginTop: spacing.lg,
+    borderWidth: 1,
+    borderColor: withAlpha(colors.info, 0.22),
+  },
+  infoBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: spacing.sm,
   },
-  emptyText: {
-    ...typography.body,
-    color: colors.textSecondary,
-  },
-  infoBanner: {
-    marginTop: spacing.md,
-    backgroundColor: withAlpha(colors.blue, 0.08),
-    borderLeftWidth: 4,
-    borderLeftColor: colors.blue,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-  },
   infoBannerText: {
-    ...typography.caption,
+    ...typography.small,
     color: colors.text,
-  },
-  infoBannerBold: {
-    fontWeight: '700',
+    flex: 1,
   },
 });
